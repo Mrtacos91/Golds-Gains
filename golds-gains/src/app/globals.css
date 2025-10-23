@@ -74,3 +74,22 @@ body {
 .animate-checkmark {
   animation: checkmark 0.4s ease-out;
 }
+
+/* Make common interactive controls show pointer cursor */
+button,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+select,
+summary,
+[role="button"],
+[data-interactive],
+.btn,
+.dropdown {
+  cursor: pointer;
+}
+
+/* Utility class for marking custom elements as interactive */
+.interactive {
+  cursor: pointer;
+}

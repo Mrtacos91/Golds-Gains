@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import DumbbellLoader from "./DumbbellLoader";
 
 interface HomeUser {
   name: string;
@@ -39,6 +41,7 @@ const DAYS_OF_WEEK = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 
 export default function HomeSection({ user }: HomeSectionProps) {
   const supabase = createClient();
+  const router = useRouter();
   const [todayExercises, setTodayExercises] = useState<TodayExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [dayCompleted, setDayCompleted] = useState(false);
@@ -47,15 +50,22 @@ export default function HomeSection({ user }: HomeSectionProps) {
   const [monthlyWorkouts, setMonthlyWorkouts] = useState(0);
   const [monthlyProgress, setMonthlyProgress] = useState(0);
   const [welcomeMessage, setWelcomeMessage] = useState("");
+  const [navigating, setNavigating] = useState(false);
 
   useEffect(() => {
     loadUserId();
     // Seleccionar mensaje random al cargar el componente
     const messages = [
       "Hola marido",
-      "Listo para dejar de ser skinny bitch?",
+      "Listo para dejar de ser un skinny bitch?",
       "Bienvenido al plan fit me",
       "Yo y los longevos cuando:",
+      "El dolor es temporal, el orgullo es para siempre",
+      "Light weight baby",
+      "No pain, no gain",
+      "Robale el ensure a tu abuela",
+      "El único mal entrenamiento es el que no se hace",
+      "Muchos admiran mi fisico, pero no saben cuantos huevos tuve que meterme en la boca",
     ];
     const randomMessage = messages[Math.floor(Math.random() * messages.length)];
     setWelcomeMessage(randomMessage);
@@ -321,6 +331,22 @@ export default function HomeSection({ user }: HomeSectionProps) {
       setLoading(false);
     }
   };
+
+  const handleNavigation = (path: string) => {
+    setNavigating(true);
+    setTimeout(() => {
+      router.push(path);
+    }, 800);
+  };
+
+  if (navigating) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <DumbbellLoader size={150} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Welcome Card */}
@@ -416,7 +442,7 @@ export default function HomeSection({ user }: HomeSectionProps) {
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <button
-            onClick={() => (window.location.href = "/plan")}
+            onClick={() => handleNavigation("/plan")}
             className="bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 rounded-lg p-4 text-left transition-all shadow-lg"
           >
             <div className="w-10 h-10 rounded-full bg-orange-400/10 flex items-center justify-center mb-3">
@@ -439,7 +465,7 @@ export default function HomeSection({ user }: HomeSectionProps) {
           </button>
 
           <button
-            onClick={() => (window.location.href = "/progress")}
+            onClick={() => handleNavigation("/progress")}
             className="bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 rounded-lg p-4 text-left transition-all shadow-lg"
           >
             <div className="w-10 h-10 rounded-full bg-pink-400/10 flex items-center justify-center mb-3">
@@ -461,7 +487,10 @@ export default function HomeSection({ user }: HomeSectionProps) {
             <p className="text-gray-500 text-sm">Progreso de hoy</p>
           </button>
 
-          <button className="bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 rounded-lg p-4 text-left transition-all shadow-lg">
+          <button
+            onClick={() => handleNavigation("/goals")}
+            className="bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 rounded-lg p-4 text-left transition-all shadow-lg"
+          >
             <div className="w-10 h-10 rounded-full bg-blue-400/10 flex items-center justify-center mb-3">
               <svg
                 className="w-5 h-5 text-blue-400"
@@ -549,7 +578,7 @@ export default function HomeSection({ user }: HomeSectionProps) {
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-400"></div>
+            <DumbbellLoader size={80} />
           </div>
         ) : todayExercises.length > 0 ? (
           <div className="space-y-3">
