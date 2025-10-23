@@ -27,6 +27,7 @@ export default function HomePage() {
 
   useEffect(() => {
     checkUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function checkUser() {
@@ -124,7 +125,7 @@ export default function HomePage() {
       <footer className="bg-linear-to-r from-[#0a0a0a] to-[#0f0f0f] border-t border-gray-800/50 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="text-center text-gray-500 text-sm">
-            <p>© 2025 Gold's Gains. Todos los derechos reservados.</p>
+            <p>© 2025 Gold&apos;s Gains. Todos los derechos reservados.</p>
             <p className="mt-2">Diseñado para alcanzar tus metas de fitness</p>
           </div>
         </div>

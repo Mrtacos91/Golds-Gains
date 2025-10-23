@@ -4,13 +4,22 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
+interface User {
+  name: string;
+  email: string;
+  phone?: string;
+  role: string;
+  created_at: string;
+}
+
 export default function Home() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     checkUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function checkUser() {
@@ -52,7 +61,7 @@ export default function Home() {
       <div className="max-w-4xl mx-auto">
         <div className="bg-[#2d2d2d] rounded-2xl shadow-2xl border border-[#3d3d3d] p-8">
           <h1 className="text-3xl font-bold text-white mb-6">
-            Bienvenido a Gold's Gains
+            Bienvenido a Gold&apos;s Gains
           </h1>
 
           {user && (

@@ -35,22 +35,6 @@ interface TodayExercise {
   status: string;
 }
 
-interface Workout {
-  id: number;
-  user_id: string;
-  split: string;
-  exercises: string[];
-  series: number[];
-  reps: number[];
-  days: string[];
-  status: string[];
-  weight: string[];
-  rir: number[];
-  completed_at: (string | null)[];
-  its_done: boolean;
-  created_at: string;
-}
-
 const DAYS_OF_WEEK = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 
 export default function HomeSection({ user }: HomeSectionProps) {
@@ -75,6 +59,7 @@ export default function HomeSection({ user }: HomeSectionProps) {
     ];
     const randomMessage = messages[Math.floor(Math.random() * messages.length)];
     setWelcomeMessage(randomMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -82,6 +67,7 @@ export default function HomeSection({ user }: HomeSectionProps) {
       loadTodayExercises();
       loadMonthlyStats();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   // Obtener el UUID del usuario autenticado
@@ -131,7 +117,7 @@ export default function HomeSection({ user }: HomeSectionProps) {
       // Contar workouts del mes actual
       const { data: workouts, error } = await supabase
         .from("workout")
-        .select("id, its_done")
+        .select("id, its_done, created_at")
         .eq("user_id", userId)
         .gte("created_at", firstDayStr)
         .lte("created_at", `${lastDayStr}T23:59:59`);
@@ -147,13 +133,13 @@ export default function HomeSection({ user }: HomeSectionProps) {
       if (workouts) {
         // Contar workouts únicos (por día) usando Set de fechas
         const uniqueDays = new Set(
-          workouts.map((w: any) => w.created_at?.split("T")[0])
+          workouts.map((w: { created_at?: string }) => w.created_at?.split("T")[0])
         );
         setMonthlyWorkouts(uniqueDays.size);
 
         // Calcular progreso (días completados / total de workouts)
         const completedWorkouts = workouts.filter(
-          (w: any) => w.its_done === true
+          (w: { its_done?: boolean }) => w.its_done === true
         ).length;
         const progress =
           workouts.length > 0
@@ -567,9 +553,6 @@ export default function HomeSection({ user }: HomeSectionProps) {
           <div className="space-y-3">
             {todayExercises.map((exercise, index) => {
               const completed = exercise.status === "completado";
-              const progressPercentage = Math.round(
-                ((index + (completed ? 1 : 0)) / todayExercises.length) * 100
-              );
 
               return (
                 <div

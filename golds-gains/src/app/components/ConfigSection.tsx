@@ -215,7 +215,6 @@ export default function ConfigSection({ user }: ConfigSectionProps) {
           <button
             onClick={async () => {
               const { supabase } = await import("@/lib/supabase");
-              const { useRouter } = await import("next/navigation");
               await supabase.auth.signOut();
               localStorage.removeItem("user");
               window.location.href = "/login";

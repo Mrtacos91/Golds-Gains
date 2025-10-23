@@ -190,6 +190,7 @@ export default function PlanPage() {
 
   useEffect(() => {
     checkExistingPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkExistingPlan = async () => {

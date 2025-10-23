@@ -17,13 +17,14 @@ export default function Navbar({
         <div className="flex justify-between items-center h-20">
           {/* Logo */}
           <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.png"
-              alt="Gold's Gains"
+              alt="Gold&apos;s Gains"
               className="w-10 h-10 object-contain"
             />
             <h1 className="text-2xl font-bold bg-linear-to-r from-orange-400 to-orange-500 bg-clip-text text-transparent hidden sm:block">
-              Gold's Gains
+              Gold&apos;s Gains
             </h1>
           </div>
 

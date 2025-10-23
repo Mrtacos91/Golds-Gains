@@ -67,7 +67,7 @@ export default function LoginPage() {
 
       // Redirigir a la página principal
       router.push("/home");
-    } catch (err) {
+    } catch (_err) {
       setError("Error de conexión. Intenta nuevamente.");
       setLoading(false);
     }
@@ -78,7 +78,7 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
@@ -96,7 +96,7 @@ export default function LoginPage() {
       }
 
       // El usuario será redirigido a Google para autenticación
-    } catch (err) {
+    } catch (_err) {
       setError("Error al conectar con Google. Intenta nuevamente.");
       setLoading(false);
     }

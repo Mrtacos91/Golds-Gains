@@ -18,8 +18,13 @@ export const metadata: Metadata = {
   description: "Routines & Training - Gold's Gains",
   manifest: "/manifest.json",
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: [
+      { url: "/logo.png", sizes: "any" },
+      { url: "/logo.png", sizes: "32x32", type: "image/png" },
+      { url: "/logo.png", sizes: "16x16", type: "image/png" },
+    ],
+    apple: [{ url: "/logo.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/logo.png",
   },
   themeColor: "#fb923c",
   viewport: "width=device-width, initial-scale=1, maximum-scale=1",
@@ -38,9 +43,13 @@ export default function RootLayout({
   return (
     <html lang="es">
       <head>
-        <link rel="icon" href="/logo.png" />
-        <link rel="apple-touch-icon" href="/logo.png" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/logo.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/logo.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/logo.png" />
+        <link rel="shortcut icon" href="/logo.png" />
         <meta name="theme-color" content="#fb923c" />
+        <meta name="apple-mobile-web-app-title" content="Gold's Gains" />
+        <meta name="application-name" content="Gold's Gains" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

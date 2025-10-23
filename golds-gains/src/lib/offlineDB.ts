@@ -3,10 +3,27 @@ const DB_NAME = "GoldsGainsDB";
 const DB_VERSION = 1;
 const STORE_NAME = "pendingWorkouts";
 
+export interface WorkoutData {
+  user_id: string;
+  split: string;
+  exercises: string[];
+  series: number[];
+  reps: number[];
+  days: string[];
+  status: string[];
+  weight: string[];
+  rir: number[];
+  completed_at: (string | null)[];
+  its_done: boolean;
+  created_at: string;
+  isUpdate: boolean;
+  id?: number;
+}
+
 export interface PendingWorkout {
   id?: number;
   timestamp: number;
-  workoutData: any;
+  workoutData: WorkoutData;
   synced: boolean;
 }
 
@@ -43,7 +60,9 @@ export const openDB = (): Promise<IDBDatabase> => {
 };
 
 // Guardar workout pendiente en IndexedDB
-export const saveOfflineWorkout = async (workoutData: any): Promise<number> => {
+export const saveOfflineWorkout = async (
+  workoutData: WorkoutData
+): Promise<number> => {
   const db = await openDB();
 
   return new Promise((resolve, reject) => {

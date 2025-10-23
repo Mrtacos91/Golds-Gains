@@ -39,6 +39,22 @@ interface ExerciseProgress {
   status: string;
 }
 
+interface Workout {
+  id: number;
+  user_id: string;
+  split: string;
+  exercises: string[];
+  series: number[];
+  reps: number[];
+  days: string[];
+  status: string[];
+  weight: string[];
+  rir: number[];
+  completed_at: (string | null)[];
+  its_done: boolean;
+  created_at: string;
+}
+
 const DAYS_OF_WEEK = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 
 export default function ProgressPage() {
@@ -71,7 +87,7 @@ export default function ProgressPage() {
   const [weightUnit, setWeightUnit] = useState<"kg" | "lb">("kg");
   const [exercises, setExercises] = useState<ExerciseProgress[]>([]);
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
-  const [existingWorkout, setExistingWorkout] = useState<any>(null);
+  const [existingWorkout, setExistingWorkout] = useState<Workout | null>(null);
   const [isToday, setIsToday] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingSync, setPendingSync] = useState(0);
@@ -87,13 +103,14 @@ export default function ProgressPage() {
     window.addEventListener("offline", handleOffline);
 
     // Listener para sincronización
-    window.addEventListener("sync-workouts", handleSyncWorkouts);
+    window.addEventListener("sync-workouts", handleSyncWorkouts as EventListener);
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
-      window.removeEventListener("sync-workouts", handleSyncWorkouts);
+      window.removeEventListener("sync-workouts", handleSyncWorkouts as EventListener);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -101,6 +118,7 @@ export default function ProgressPage() {
       checkIfToday();
       loadExercisesForDay();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, selectedDay, selectedDate]);
 
   const loadPlan = async () => {
@@ -690,10 +708,10 @@ export default function ProgressPage() {
 
           setShowSuccessMessage(true);
           setTimeout(() => setShowSuccessMessage(false), 2000);
-        } catch (offlineError) {
+        } catch (_offlineError) {
           console.error(
             "[handleSubmit] ❌ Error al guardar offline:",
-            offlineError
+            _offlineError
           );
           alert("Error al guardar offline. Intenta de nuevo.");
         }
@@ -782,7 +800,7 @@ export default function ProgressPage() {
 
           setShowSuccessMessage(true);
           setTimeout(() => setShowSuccessMessage(false), 2000);
-        } catch (offlineError) {
+        } catch (_offlineError) {
           alert("Error al guardar el registro: " + error.message);
         }
       } else {
@@ -869,7 +887,7 @@ export default function ProgressPage() {
         } else {
           alert("Error al guardar el registro");
         }
-      } catch (offlineError) {
+      } catch (_offlineError) {
         alert("Error al guardar el registro");
       }
     } finally {
@@ -1262,7 +1280,8 @@ export default function ProgressPage() {
                         }
                         disabled={
                           !isToday ||
-                          (existingWorkout && existingWorkout.its_done)
+                          (existingWorkout && existingWorkout.its_done) ||
+                          false
                         }
                         className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-300 transform ${
                           !isToday ||
@@ -1331,7 +1350,8 @@ export default function ProgressPage() {
                             }
                             disabled={
                               !isToday ||
-                              (existingWorkout && existingWorkout.its_done)
+                              (existingWorkout && existingWorkout.its_done) ||
+                              false
                             }
                             className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
                               !isToday ||
@@ -1387,7 +1407,8 @@ export default function ProgressPage() {
                                 placeholder={exercise.plannedReps.toString()}
                                 disabled={
                                   !isToday ||
-                                  (existingWorkout && existingWorkout.its_done)
+                                  (existingWorkout && existingWorkout.its_done) ||
+                                  false
                                 }
                                 className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
@@ -1414,7 +1435,8 @@ export default function ProgressPage() {
                                 placeholder="0"
                                 disabled={
                                   !isToday ||
-                                  (existingWorkout && existingWorkout.its_done)
+                                  (existingWorkout && existingWorkout.its_done) ||
+                                  false
                                 }
                                 className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
@@ -1441,7 +1463,8 @@ export default function ProgressPage() {
                                 placeholder="0"
                                 disabled={
                                   !isToday ||
-                                  (existingWorkout && existingWorkout.its_done)
+                                  (existingWorkout && existingWorkout.its_done) ||
+                                  false
                                 }
                                 className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
