@@ -103,12 +103,18 @@ export default function ProgressPage() {
     window.addEventListener("offline", handleOffline);
 
     // Listener para sincronización
-    window.addEventListener("sync-workouts", handleSyncWorkouts as EventListener);
+    window.addEventListener(
+      "sync-workouts",
+      handleSyncWorkouts as EventListener
+    );
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
-      window.removeEventListener("sync-workouts", handleSyncWorkouts as EventListener);
+      window.removeEventListener(
+        "sync-workouts",
+        handleSyncWorkouts as EventListener
+      );
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1407,7 +1413,8 @@ export default function ProgressPage() {
                                 placeholder={exercise.plannedReps.toString()}
                                 disabled={
                                   !isToday ||
-                                  (existingWorkout && existingWorkout.its_done) ||
+                                  (existingWorkout &&
+                                    existingWorkout.its_done) ||
                                   false
                                 }
                                 className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1435,7 +1442,8 @@ export default function ProgressPage() {
                                 placeholder="0"
                                 disabled={
                                   !isToday ||
-                                  (existingWorkout && existingWorkout.its_done) ||
+                                  (existingWorkout &&
+                                    existingWorkout.its_done) ||
                                   false
                                 }
                                 className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1463,7 +1471,8 @@ export default function ProgressPage() {
                                 placeholder="0"
                                 disabled={
                                   !isToday ||
-                                  (existingWorkout && existingWorkout.its_done) ||
+                                  (existingWorkout &&
+                                    existingWorkout.its_done) ||
                                   false
                                 }
                                 className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"

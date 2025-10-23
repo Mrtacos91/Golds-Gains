@@ -133,7 +133,9 @@ export default function HomeSection({ user }: HomeSectionProps) {
       if (workouts) {
         // Contar workouts únicos (por día) usando Set de fechas
         const uniqueDays = new Set(
-          workouts.map((w: { created_at?: string }) => w.created_at?.split("T")[0])
+          workouts.map(
+            (w: { created_at?: string }) => w.created_at?.split("T")[0]
+          )
         );
         setMonthlyWorkouts(uniqueDays.size);
 

@@ -20,7 +20,7 @@ export default function Navbar({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.png"
-              alt="Gold&apos;s Gains"
+              alt="Gold's Gains"
               className="w-10 h-10 object-contain"
             />
             <h1 className="text-2xl font-bold bg-linear-to-r from-orange-400 to-orange-500 bg-clip-text text-transparent hidden sm:block">

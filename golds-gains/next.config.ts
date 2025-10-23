@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   /* config options here */
   // Turbopack configuration
   turbopack: {},
-  
+
   // Headers para Service Worker
   async headers() {
     return [
