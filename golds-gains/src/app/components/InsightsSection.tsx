@@ -27,6 +27,60 @@ interface LoadProgression {
   data: { date: string; avgWeight: number }[];
 }
 
+interface WorkoutDay {
+  date: string;
+  completed: boolean;
+  hasWorkout: boolean;
+}
+
+interface Plan {
+  id: number;
+  user_id: string;
+  split: string;
+  exercises: string[];
+  series: number[];
+  reps: number[];
+  days: string[];
+  status: string[] | null;
+  its_done: boolean | null;
+  created_at: string;
+}
+
+// Función helper para manejar fechas sin problemas de timezone
+// Obtiene la fecha local (sin conversión a UTC)
+function getLocalDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// Parsea ISO string (UTC) y lo convierte a fecha local
+// Ej: "2025-10-24T12:34:56.253+00" -> Date local
+function parseUTCToLocalDate(isoString: string): Date {
+  // Eliminar el offset de timezone (+00, -05, etc)
+  const cleanIso = isoString.replace(/[+-]\d{2}$/, "");
+  const utcDate = new Date(cleanIso);
+
+  // Convertir UTC a timezone local
+  const localDate = new Date(
+    utcDate.getUTCFullYear(),
+    utcDate.getUTCMonth(),
+    utcDate.getUTCDate(),
+    utcDate.getUTCHours(),
+    utcDate.getUTCMinutes(),
+    utcDate.getUTCSeconds()
+  );
+
+  return localDate;
+}
+
+// Parsea solo la parte de fecha (YYYY-MM-DD) y crea Date local
+function parseLocalDateString(dateString: string): Date {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 export default function InsightsSection() {
   const [adherence, setAdherence] = useState({
     completed: 0,
@@ -39,6 +93,9 @@ export default function InsightsSection() {
   );
   const [avgSeriesTime, setAvgSeriesTime] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
+  const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<string>("");
 
   useEffect(() => {
     loadInsightsData();
@@ -51,6 +108,22 @@ export default function InsightsSection() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Get current plan
+      const { data: planData } = await supabase
+        .from("plan")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (planData) {
+        setCurrentPlan(planData as Plan);
+        if (planData.exercises && planData.exercises.length > 0) {
+          setSelectedExercise(planData.exercises[0]);
+        }
+      }
 
       // Get last 6 months of workouts
       const sixMonthsAgo = new Date();
@@ -73,14 +146,21 @@ export default function InsightsSection() {
       // 1. Calculate training adherence
       calculateAdherence(records);
 
-      // 2. Calculate load progression
-      calculateLoadProgression(records);
+      // 2. Calculate load progression (new logic)
+      if (planData) {
+        calculateLoadProgressionByPlan(records, planData as Plan);
+      } else {
+        calculateLoadProgression(records);
+      }
 
       // 3. Calculate daily completion percentages
       calculateCompletionHistory(records);
 
-      // 4. Calculate average series time (mock for now, would need completed_at timestamps)
+      // 4. Calculate average series time
       calculateAvgSeriesTime(records);
+
+      // 5. Generate workout calendar data
+      generateWorkoutCalendar(records);
 
       setLoading(false);
     } catch (err) {
@@ -105,6 +185,9 @@ export default function InsightsSection() {
     >();
 
     records.forEach((workout) => {
+      const workoutDate = parseUTCToLocalDate(workout.created_at);
+      const dateStr = getLocalDateString(workoutDate);
+
       workout.exercises.forEach((exercise, idx) => {
         const weightStr = workout.weight?.[idx] || "0";
         const weight = parseFloat(weightStr) || 0;
@@ -114,7 +197,7 @@ export default function InsightsSection() {
         }
 
         exerciseMap.get(exercise)!.push({
-          date: workout.created_at.split("T")[0],
+          date: dateStr,
           weights: [weight],
         });
       });
@@ -149,16 +232,90 @@ export default function InsightsSection() {
     setLoadProgression(progressions.slice(0, 3));
   }
 
+  function calculateLoadProgressionByPlan(
+    records: WorkoutRecord[],
+    plan: Plan
+  ) {
+    // Get exercises from current plan
+    const planExercises = plan.exercises || [];
+
+    if (planExercises.length === 0) {
+      calculateLoadProgression(records);
+      return;
+    }
+
+    // Create progression data for each exercise in the plan
+    const progressions: LoadProgression[] = [];
+
+    planExercises.forEach((exercise) => {
+      const dateMap = new Map<string, number[]>();
+
+      // Find all workouts that contain this exercise
+      records.forEach((workout) => {
+        // Los ejercicios pueden aparecer múltiples veces en el array (una por serie)
+        workout.exercises.forEach((ex, idx) => {
+          if (ex.toLowerCase() === exercise.toLowerCase()) {
+            const workoutDate = parseUTCToLocalDate(workout.created_at);
+            const date = getLocalDateString(workoutDate);
+            const weightStr = workout.weight?.[idx] || "0";
+
+            // Extraer solo el número del peso, sin la unidad
+            const weightMatch = weightStr.match(/[\d.]+/);
+            const weight = weightMatch ? parseFloat(weightMatch[0]) : 0;
+
+            if (weight > 0) {
+              if (!dateMap.has(date)) {
+                dateMap.set(date, []);
+              }
+              dateMap.get(date)!.push(weight);
+            }
+          }
+        });
+      });
+
+      // Calculate average weight per date
+      if (dateMap.size > 0) {
+        const data = Array.from(dateMap.entries())
+          .map(([date, weights]) => ({
+            date,
+            avgWeight: weights.reduce((sum, w) => sum + w, 0) / weights.length,
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date));
+
+        // Solo agregar si hay al menos 1 punto de datos
+        if (data.length > 0) {
+          progressions.push({ exercise, data });
+        }
+      }
+    });
+
+    // Sort by data points and take top exercises with most data
+    progressions.sort((a, b) => b.data.length - a.data.length);
+    setLoadProgression(progressions);
+
+    console.log(
+      "[Load Progression] Generated for",
+      progressions.length,
+      "exercises from plan with data:",
+      progressions.map((p) => ({
+        exercise: p.exercise,
+        dataPoints: p.data.length,
+      }))
+    );
+  }
+
   function calculateCompletionHistory(records: WorkoutRecord[]) {
     // Group by date and calculate completion percentage per day
     const dateMap = new Map<string, { total: number; completed: number }>();
 
     records.forEach((workout) => {
-      const date = workout.created_at.split("T")[0];
-      if (!dateMap.has(date)) {
-        dateMap.set(date, { total: 0, completed: 0 });
+      const workoutDate = parseUTCToLocalDate(workout.created_at);
+      const dateStr = getLocalDateString(workoutDate);
+
+      if (!dateMap.has(dateStr)) {
+        dateMap.set(dateStr, { total: 0, completed: 0 });
       }
-      const entry = dateMap.get(date)!;
+      const entry = dateMap.get(dateStr)!;
       entry.total += workout.exercises.length;
 
       // Count completed exercises based on its_done flag
@@ -200,6 +357,246 @@ export default function InsightsSection() {
 
     const avg = count > 0 ? Math.round(totalIntervals / count) : 90;
     setAvgSeriesTime(avg);
+  }
+
+  function generateWorkoutCalendar(records: WorkoutRecord[]) {
+    // Usar timezone local correctamente
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const todayDateStr = getLocalDateString(today);
+
+    // Primer y último día del mes actual
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+
+    // Mapear workouts por fecha (formato YYYY-MM-DD)
+    const workoutMap = new Map<string, { completed: boolean; count: number }>();
+
+    records.forEach((workout) => {
+      const workoutDate = parseUTCToLocalDate(workout.created_at);
+      const workoutDateStr = getLocalDateString(workoutDate);
+
+      // Filtrar solo workouts del mes actual
+      if (
+        workoutDate.getFullYear() === year &&
+        workoutDate.getMonth() === month
+      ) {
+        const existing = workoutMap.get(workoutDateStr);
+
+        if (existing) {
+          workoutMap.set(workoutDateStr, {
+            completed: existing.completed || workout.its_done,
+            count: existing.count + 1,
+          });
+        } else {
+          workoutMap.set(workoutDateStr, {
+            completed: workout.its_done,
+            count: 1,
+          });
+        }
+      }
+    });
+
+    // Generar array de días del mes actual
+    const days: WorkoutDay[] = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day);
+      const dateStr = getLocalDateString(date);
+      const workoutData = workoutMap.get(dateStr);
+
+      days.push({
+        date: dateStr,
+        hasWorkout: !!workoutData,
+        completed: workoutData?.completed || false,
+      });
+    }
+
+    console.log(
+      `[Calendar] ${year}-${String(month + 1).padStart(2, "0")}: ${
+        days.length
+      } days, ${workoutMap.size} workouts, today: ${todayDateStr}`
+    );
+    setWorkoutDays(days);
+  }
+
+  function renderWorkoutCalendar() {
+    if (workoutDays.length === 0) {
+      return (
+        <p className="text-gray-500 text-center py-3">
+          No hay datos de entrenamientos
+        </p>
+      );
+    }
+
+    // Obtener día de la semana del primer día (0=Dom, 1=Lun, ..., 6=Sáb)
+    const firstDate = parseLocalDateString(workoutDays[0].date);
+    let startWeekday = firstDate.getDay();
+    // Convertir a sistema Lun=0, Dom=6
+    startWeekday = startWeekday === 0 ? 6 : startWeekday - 1;
+
+    // Construir grid con celdas vacías al inicio
+    const cells: (WorkoutDay | null)[] = Array(startWeekday).fill(null);
+    cells.push(...workoutDays);
+
+    // Completar última semana
+    const remainingCells = 7 - (cells.length % 7);
+    if (remainingCells < 7) {
+      cells.push(...Array(remainingCells).fill(null));
+    }
+
+    // Dividir en semanas
+    const weeks: (WorkoutDay | null)[][] = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      weeks.push(cells.slice(i, i + 7));
+    }
+
+    // Nombre del mes
+    const monthName = firstDate.toLocaleDateString("es-ES", {
+      month: "long",
+      year: "numeric",
+    });
+
+    const todayStr = getLocalDateString(new Date());
+    const completedCount = workoutDays.filter((d) => d.completed).length;
+
+    return (
+      <div className="space-y-2">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-2">
+          <h5 className="text-sm font-semibold text-white capitalize">
+            {monthName}
+          </h5>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+            <span className="text-[10px] text-gray-400">
+              {completedCount} completados
+            </span>
+          </div>
+        </div>
+
+        {/* Días de la semana */}
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {["L", "M", "X", "J", "V", "S", "D"].map((day, idx) => (
+            <div
+              key={idx}
+              className="text-center text-[9px] font-bold text-gray-500 uppercase"
+            >
+              {day}
+            </div>
+          ))}
+        </div>
+
+        {/* Grid del calendario */}
+        <div className="space-y-1">
+          {weeks.map((week, weekIdx) => (
+            <div key={weekIdx} className="grid grid-cols-7 gap-1">
+              {week.map((cell, dayIdx) => {
+                if (!cell) {
+                  return (
+                    <div
+                      key={`empty-${weekIdx}-${dayIdx}`}
+                      className="aspect-square rounded-lg"
+                    />
+                  );
+                }
+
+                const cellDate = parseLocalDateString(cell.date);
+                const dayNum = cellDate.getDate();
+                const isToday = cell.date === todayStr;
+                const isFuture = cellDate > new Date();
+
+                // Estilos dinámicos
+                let bg = "bg-[#0d0d0f]";
+                let border = "border-[#1f1f23]";
+                let text = "text-gray-600";
+                let shadow = "";
+
+                if (isFuture) {
+                  bg = "bg-[#111113]";
+                  text = "text-gray-700";
+                  border = "border-[#1a1a1c]";
+                } else if (cell.hasWorkout) {
+                  if (cell.completed) {
+                    bg = "bg-linear-to-br from-green-500/20 to-emerald-600/15";
+                    border = "border-green-500/40";
+                    text = "text-green-300";
+                    shadow = "shadow-md shadow-green-500/15";
+                  } else {
+                    bg = "bg-linear-to-br from-red-500/20 to-rose-600/15";
+                    border = "border-red-500/40";
+                    text = "text-red-300";
+                    shadow = "shadow-md shadow-red-500/15";
+                  }
+                }
+
+                if (isToday) {
+                  border = "border-blue-400/60";
+                  shadow = "shadow-lg shadow-blue-400/25";
+                }
+
+                return (
+                  <div
+                    key={cell.date}
+                    className={`aspect-square rounded-lg border ${bg} ${border} ${shadow}
+                      flex items-center justify-center transition-all duration-200 cursor-pointer
+                      hover:scale-105 active:scale-95 relative group`}
+                    title={`${cell.date}${
+                      cell.hasWorkout
+                        ? ` - ${
+                            cell.completed ? "✓ Completado" : "✗ No completado"
+                          }`
+                        : ""
+                    }`}
+                  >
+                    {isToday && (
+                      <div className="absolute top-0.5 right-0.5">
+                        <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse"></div>
+                      </div>
+                    )}
+
+                    <span
+                      className={`text-[10px] font-bold ${text} transition-transform duration-150 group-hover:scale-110`}
+                    >
+                      {dayNum}
+                    </span>
+
+                    {cell.hasWorkout && (
+                      <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2">
+                        <div
+                          className={`w-0.5 h-0.5 rounded-full ${
+                            cell.completed ? "bg-green-400" : "bg-red-400"
+                          }`}
+                        ></div>
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 bg-white/0 group-hover:bg-white/5 transition-colors duration-150 rounded-lg"></div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Leyenda compacta */}
+        <div className="flex items-center justify-center gap-2 pt-2 border-t border-gray-800/20">
+          <div className="flex items-center gap-1">
+            <div className="w-4 h-4 rounded-md border bg-[#0d0d0f] border-[#1f1f23]"></div>
+            <span className="text-[9px] text-gray-500">Sin datos</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-4 h-4 rounded-md border bg-linear-to-br from-red-500/20 to-rose-600/15 border-red-500/40"></div>
+            <span className="text-[9px] text-gray-500">No completado</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-4 h-4 rounded-md border bg-linear-to-br from-green-500/20 to-emerald-600/15 border-green-500/40"></div>
+            <span className="text-[9px] text-gray-500">Completado</span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (loading) {
@@ -248,7 +645,7 @@ export default function InsightsSection() {
             </p>
           </div>
         </div>
-        <div className="w-full bg-[#0f0f0f] rounded-lg h-8 border border-gray-800/50 overflow-hidden">
+        <div className="w-full bg-[#0f0f0f] rounded-lg h-8 border border-gray-800/50 overflow-hidden mb-6">
           <div
             className="bg-linear-to-r from-green-400 to-green-500 h-full flex items-center justify-center text-white text-sm font-semibold shadow-lg shadow-green-400/20 transition-all duration-500"
             style={{ width: `${adherence.percentage}%` }}
@@ -256,88 +653,185 @@ export default function InsightsSection() {
             {adherence.percentage > 15 ? `${adherence.percentage}%` : ""}
           </div>
         </div>
+
+        {/* Calendario de entrenamientos */}
+        <div className="mt-6">
+          <h4 className="text-base font-semibold text-white mb-3">
+            Historial del Mes Actual
+          </h4>
+          {renderWorkoutCalendar()}
+        </div>
       </div>
 
       {/* Load Progression & Series Time */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Load Progression */}
-        <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-6 border border-gray-800/50 shadow-xl">
-          <h3 className="text-xl font-semibold text-white mb-4">
-            Progresión de Cargas (últimos 6 meses)
-          </h3>
+        <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-4 sm:p-6 border border-gray-800/50 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <h3 className="text-lg sm:text-xl font-semibold text-white">
+              Progresión de Cargas
+            </h3>
+            {currentPlan &&
+              currentPlan.exercises &&
+              currentPlan.exercises.length > 1 && (
+                <select
+                  value={selectedExercise}
+                  onChange={(e) => setSelectedExercise(e.target.value)}
+                  className="bg-[#0f0f0f] text-white text-xs sm:text-sm px-3 py-2 rounded-lg border border-gray-800 focus:border-orange-400 focus:outline-none w-full sm:w-auto max-w-full truncate"
+                >
+                  {currentPlan.exercises.map((exercise, idx) => (
+                    <option key={idx} value={exercise}>
+                      {exercise}
+                    </option>
+                  ))}
+                </select>
+              )}
+          </div>
+
           {loadProgression.length > 0 ? (
             <div className="space-y-6">
-              {loadProgression.map((prog, idx) => {
-                const firstWeight = prog.data[0]?.avgWeight || 0;
-                const lastWeight =
-                  prog.data[prog.data.length - 1]?.avgWeight || 0;
-                const increase = lastWeight - firstWeight;
-                const increasePercent =
-                  firstWeight > 0
-                    ? Math.round((increase / firstWeight) * 100)
-                    : 0;
+              {loadProgression
+                .filter(
+                  (prog) =>
+                    !selectedExercise || prog.exercise === selectedExercise
+                )
+                .slice(0, selectedExercise ? 1 : 3)
+                .map((prog, idx) => {
+                  const firstWeight = prog.data[0]?.avgWeight || 0;
+                  const lastWeight =
+                    prog.data[prog.data.length - 1]?.avgWeight || 0;
+                  const increase = lastWeight - firstWeight;
+                  const increasePercent =
+                    firstWeight > 0
+                      ? Math.round((increase / firstWeight) * 100)
+                      : 0;
 
-                return (
-                  <div key={idx} className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <p className="text-white font-medium text-sm truncate">
-                        {prog.exercise}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-400 text-xs">
-                          {firstWeight.toFixed(1)} kg
-                        </span>
-                        <svg
-                          className="w-4 h-4 text-green-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                          />
-                        </svg>
-                        <span className="text-green-400 text-xs font-semibold">
-                          {lastWeight.toFixed(1)} kg
-                        </span>
-                        <span className="text-green-400 text-xs">
-                          ({increasePercent > 0 ? "+" : ""}
-                          {increasePercent}%)
-                        </span>
+                  return (
+                    <div key={idx} className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                        <p className="text-white font-medium text-sm sm:text-base">
+                          {prog.exercise}
+                        </p>
+                        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                          <span className="text-gray-400 text-xs">
+                            {firstWeight.toFixed(1)} kg
+                          </span>
+                          <svg
+                            className={`w-3 h-3 sm:w-4 sm:h-4 ${
+                              increase >= 0 ? "text-green-400" : "text-red-400"
+                            }`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d={
+                                increase >= 0
+                                  ? "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+                                  : "M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"
+                              }
+                            />
+                          </svg>
+                          <span
+                            className={`text-xs font-semibold ${
+                              increase >= 0 ? "text-green-400" : "text-red-400"
+                            }`}
+                          >
+                            {lastWeight.toFixed(1)} kg
+                          </span>
+                          <span
+                            className={`text-xs ${
+                              increase >= 0 ? "text-green-400" : "text-red-400"
+                            }`}
+                          >
+                            ({increasePercent > 0 ? "+" : ""}
+                            {increasePercent}%)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Real-time chart */}
+                      <div className="w-full h-32 sm:h-40 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-2 sm:p-3 relative">
+                        {/* Y-axis labels */}
+                        <div className="absolute left-1 top-3 bottom-3 flex flex-col justify-between text-[10px] sm:text-xs text-gray-500">
+                          <span>
+                            {Math.max(
+                              ...prog.data.map((d) => d.avgWeight)
+                            ).toFixed(0)}
+                          </span>
+                          <span>
+                            {Math.min(
+                              ...prog.data.map((d) => d.avgWeight)
+                            ).toFixed(0)}
+                          </span>
+                        </div>
+
+                        {/* Chart */}
+                        <div className="ml-6 sm:ml-8 h-full flex items-end gap-0.5 sm:gap-1 overflow-x-auto scrollbar-hide">
+                          {prog.data.map((point, i) => {
+                            const maxWeight = Math.max(
+                              ...prog.data.map((d) => d.avgWeight)
+                            );
+                            const minWeight = Math.min(
+                              ...prog.data.map((d) => d.avgWeight)
+                            );
+                            const range = maxWeight - minWeight || 1;
+                            const height =
+                              ((point.avgWeight - minWeight) / range) * 80 + 20;
+
+                            return (
+                              <div
+                                key={i}
+                                className="flex-1 min-w-5 sm:min-w-0 flex flex-col items-center"
+                              >
+                                <div
+                                  className="w-full bg-linear-to-t from-orange-400 to-orange-500 rounded-sm transition-all duration-300 hover:opacity-80 active:opacity-70 cursor-pointer relative group"
+                                  style={{
+                                    height: `${height}%`,
+                                    minHeight: "8px",
+                                  }}
+                                >
+                                  {/* Tooltip */}
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 sm:mb-2 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-gray-900 text-white text-[10px] sm:text-xs rounded opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                                    {point.date}
+                                    <br />
+                                    {point.avgWeight.toFixed(1)} kg
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* X-axis label */}
+                        <div className="mt-2 text-center text-xs text-gray-500">
+                          {prog.data.length} entrenamientos registrados
+                        </div>
                       </div>
                     </div>
-                    <div className="w-full h-12 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-1 flex items-end gap-0.5">
-                      {prog.data.slice(-12).map((point, i) => {
-                        const maxWeight = Math.max(
-                          ...prog.data.map((d) => d.avgWeight)
-                        );
-                        const height =
-                          maxWeight > 0
-                            ? (point.avgWeight / maxWeight) * 100
-                            : 0;
-                        return (
-                          <div
-                            key={i}
-                            className="flex-1 bg-linear-to-t from-orange-400 to-orange-500 rounded-sm transition-all duration-300 hover:opacity-80"
-                            style={{ height: `${height}%`, minHeight: "4px" }}
-                            title={`${point.date}: ${point.avgWeight.toFixed(
-                              1
-                            )} kg`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           ) : (
-            <p className="text-gray-500 text-center py-8">
-              No hay suficientes datos de progresión aún
-            </p>
+            <div className="text-center py-8">
+              <p className="text-gray-500 mb-2">
+                No hay datos de progresión aún
+              </p>
+              {currentPlan && currentPlan.exercises && (
+                <p className="text-gray-600 text-sm">
+                  Completa entrenamientos con peso registrado para ver tu
+                  progreso en: {currentPlan.exercises.slice(0, 3).join(", ")}
+                </p>
+              )}
+              {!currentPlan && (
+                <p className="text-gray-600 text-sm">
+                  Crea un plan de entrenamiento y registra tus entrenamientos
+                </p>
+              )}
+            </div>
           )}
         </div>
 

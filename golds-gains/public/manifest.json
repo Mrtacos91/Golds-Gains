@@ -1,7 +1,7 @@
 {
   "name": "Gold's Gains - Workout Tracker",
   "short_name": "Gold's Gains",
-  "description": "Track your workouts and progress offline",
+  "description": "Track your workouts and progress",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

@@ -179,6 +179,7 @@ export default function PlanPage() {
   const [loading, setLoading] = useState(true);
   const [existingPlan, setExistingPlan] = useState<Plan | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Form states
   const [selectedSplit, setSelectedSplit] = useState<keyof typeof SPLITS | "">(
@@ -337,6 +338,110 @@ export default function PlanPage() {
     setDayExercises(newDayExercises);
   };
 
+  const handleEditPlan = () => {
+    if (!existingPlan) return;
+
+    // Agrupar ejercicios por día
+    const exercisesByDay: {
+      [key: string]: Array<{
+        exercise: string;
+        series: number;
+        reps: number;
+      }>;
+    } = {};
+
+    existingPlan.exercises.forEach((exercise, index) => {
+      const day = existingPlan.days[index];
+      if (!exercisesByDay[day]) {
+        exercisesByDay[day] = [];
+      }
+      exercisesByDay[day].push({
+        exercise,
+        series: existingPlan.series[index],
+        reps: existingPlan.reps[index],
+      });
+    });
+
+    // Convertir a formato DayExercises
+    const editDays: DayExercises[] = Object.entries(exercisesByDay).map(
+      ([weekDay, exercises]) => ({
+        dayName: "", // No necesitamos el nombre del día en edición
+        weekDay: weekDay,
+        exercises: exercises.map((ex) => ({
+          name: ex.exercise,
+          series: ex.series,
+          reps: ex.reps,
+        })),
+      })
+    );
+
+    setDayExercises(editDays);
+    setSelectedSplit(""); // No necesitamos el split en edición
+    setIsEditing(true);
+    setShowForm(true);
+    setStep(3); // Ir directamente al paso de edición de ejercicios
+    setCurrentDayIndex(0);
+  };
+
+  const handleUpdatePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user || !existingPlan) return;
+
+    // Consolidar todos los ejercicios de todos los días
+    const allExercises: string[] = [];
+    const allSeries: number[] = [];
+    const allReps: number[] = [];
+    const allDays: string[] = [];
+
+    dayExercises.forEach((day) => {
+      const validExercises = day.exercises.filter(
+        (ex) => ex.name.trim() !== ""
+      );
+      validExercises.forEach((ex) => {
+        allExercises.push(ex.name);
+        allSeries.push(ex.series);
+        allReps.push(ex.reps);
+        allDays.push(day.weekDay);
+      });
+    });
+
+    if (allExercises.length === 0) {
+      alert("Debes agregar al menos un ejercicio");
+      return;
+    }
+
+    const statusArray = allExercises.map(() => "pendiente");
+
+    const { error } = await supabase
+      .from("plan")
+      .update({
+        exercises: allExercises,
+        series: allSeries,
+        reps: allReps,
+        days: allDays,
+        status: statusArray,
+      })
+      .eq("id", existingPlan.id);
+
+    if (error) {
+      console.error("Error updating plan:", error);
+      alert("Error al actualizar el plan: " + error.message);
+    } else {
+      alert("Plan actualizado exitosamente");
+      await checkExistingPlan();
+      setShowForm(false);
+      setIsEditing(false);
+      setStep(1);
+      setSelectedSplit("");
+      setDayExercises([]);
+      setCurrentDayIndex(0);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -404,10 +509,10 @@ export default function PlanPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] p-6">
+    <div className="min-h-screen bg-[#0a0a0a] p-4 sm:p-6">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4 sm:mb-6">
           <button
             onClick={() => router.push("/home")}
             className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
@@ -425,26 +530,34 @@ export default function PlanPage() {
                 d="M15 19l-7-7 7-7"
               />
             </svg>
-            Volver
+            <span className="hidden sm:inline">Volver</span>
           </button>
-          {existingPlan && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="px-4 py-2 bg-orange-400 hover:bg-orange-500 text-white rounded-lg transition-colors"
-            >
-              Nuevo Plan
-            </button>
+          {existingPlan && !showForm && (
+            <div className="flex gap-2">
+              <button
+                onClick={handleEditPlan}
+                className="px-3 sm:px-4 py-2 bg-blue-400 hover:bg-blue-500 text-white rounded-lg transition-colors text-sm sm:text-base"
+              >
+                Editar
+              </button>
+              <button
+                onClick={() => setShowForm(true)}
+                className="px-3 sm:px-4 py-2 bg-orange-400 hover:bg-orange-500 text-white rounded-lg transition-colors text-sm sm:text-base"
+              >
+                Nuevo Plan
+              </button>
+            </div>
           )}
         </div>
 
         {/* Existing Plan View */}
         {existingPlan && !showForm ? (
-          <div className="space-y-6">
-            <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-8 border border-gray-800/50 shadow-xl">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-full bg-orange-400/10 flex items-center justify-center">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-4 sm:p-8 border border-gray-800/50 shadow-xl">
+              <div className="flex items-center gap-3 mb-4 sm:mb-6">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-orange-400/10 flex items-center justify-center">
                   <svg
-                    className="w-6 h-6 text-orange-400"
+                    className="w-5 h-5 sm:w-6 sm:h-6 text-orange-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -458,10 +571,10 @@ export default function PlanPage() {
                   </svg>
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-white">
+                  <h2 className="text-xl sm:text-2xl font-bold text-white">
                     {existingPlan.split}
                   </h2>
-                  <p className="text-gray-500 text-sm">
+                  <p className="text-gray-500 text-xs sm:text-sm">
                     Creado el{" "}
                     {new Date(existingPlan.created_at).toLocaleDateString()}
                   </p>
@@ -469,11 +582,11 @@ export default function PlanPage() {
               </div>
 
               {/* Exercises by Day */}
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-white mb-4">
+              <div className="mb-4 sm:mb-6">
+                <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
                   Ejercicios por Día
                 </h3>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {(() => {
                     // Agrupar ejercicios por día
                     const exercisesByDay: {
@@ -499,13 +612,13 @@ export default function PlanPage() {
                       ([day, exercises]) => (
                         <div
                           key={day}
-                          className="bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg p-4 border border-gray-800/50"
+                          className="bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg p-3 sm:p-4 border border-gray-800/50"
                         >
                           <div className="flex items-center gap-2 mb-3">
-                            <span className="px-3 py-1 bg-orange-400/20 border border-orange-400/30 rounded-full text-orange-400 text-sm font-semibold">
+                            <span className="px-2 sm:px-3 py-1 bg-orange-400/20 border border-orange-400/30 rounded-full text-orange-400 text-xs sm:text-sm font-semibold">
                               {day}
                             </span>
-                            <span className="text-gray-500 text-sm">
+                            <span className="text-gray-500 text-xs sm:text-sm">
                               {exercises.length} ejercicios
                             </span>
                           </div>
@@ -513,19 +626,19 @@ export default function PlanPage() {
                             {exercises.map((item, idx) => (
                               <div
                                 key={idx}
-                                className="flex items-center justify-between gap-3 p-2 bg-[#0a0a0a] rounded-lg"
+                                className="flex items-center justify-between gap-2 sm:gap-3 p-2 bg-[#0a0a0a] rounded-lg"
                               >
-                                <div className="flex items-center gap-3">
-                                  <div className="w-6 h-6 rounded-full bg-blue-400/10 flex items-center justify-center shrink-0">
+                                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                  <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-blue-400/10 flex items-center justify-center shrink-0">
                                     <span className="text-blue-400 font-semibold text-xs">
                                       {idx + 1}
                                     </span>
                                   </div>
-                                  <span className="text-white text-sm">
+                                  <span className="text-white text-xs sm:text-sm truncate">
                                     {item.exercise}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-3 text-xs">
+                                <div className="flex items-center gap-2 sm:gap-3 text-xs shrink-0">
                                   <span className="text-pink-400 font-semibold">
                                     {item.series}×
                                   </span>
@@ -545,7 +658,7 @@ export default function PlanPage() {
 
               {/* Status */}
               <div>
-                <h3 className="text-lg font-semibold text-white mb-4">
+                <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
                   Estado del Plan
                 </h3>
                 <div className="flex items-center gap-2">
@@ -563,13 +676,13 @@ export default function PlanPage() {
           </div>
         ) : (
           /* Create Plan Form */
-          <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-8 border border-gray-800/50 shadow-xl">
+          <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-4 sm:p-8 border border-gray-800/50 shadow-xl">
             {/* Header with Steps */}
-            <div className="mb-8">
+            <div className="mb-6 sm:mb-8">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 rounded-full bg-orange-400/10 flex items-center justify-center">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-orange-400/10 flex items-center justify-center">
                   <svg
-                    className="w-6 h-6 text-orange-400"
+                    className="w-5 h-5 sm:w-6 sm:h-6 text-orange-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -582,57 +695,59 @@ export default function PlanPage() {
                     />
                   </svg>
                 </div>
-                <h2 className="text-2xl font-bold text-white">
-                  Crear Plan de Entrenamiento
+                <h2 className="text-xl sm:text-2xl font-bold text-white">
+                  {isEditing ? "Editar Plan" : "Crear Plan de Entrenamiento"}
                 </h2>
               </div>
 
-              {/* Progress Steps */}
-              <div className="flex items-center gap-2">
-                {[1, 2, 3].map((s) => (
-                  <div key={s} className="flex items-center flex-1">
-                    <div
-                      className={`h-1 flex-1 rounded-full ${
-                        s <= step ? "bg-orange-400" : "bg-gray-800"
-                      }`}
-                    ></div>
-                    {s < 3 && (
+              {/* Progress Steps - Only show if not editing */}
+              {!isEditing && (
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3].map((s) => (
+                    <div key={s} className="flex items-center flex-1">
                       <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center mx-2 ${
-                          s < step
-                            ? "bg-orange-400 text-white"
-                            : s === step
-                            ? "bg-orange-400/20 text-orange-400 border-2 border-orange-400"
-                            : "bg-gray-800 text-gray-500"
+                        className={`h-1 flex-1 rounded-full ${
+                          s <= step ? "bg-orange-400" : "bg-gray-800"
                         }`}
-                      >
-                        {s}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      ></div>
+                      {s < 3 && (
+                        <div
+                          className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full flex items-center justify-center mx-1 sm:mx-2 text-xs sm:text-base ${
+                            s < step
+                              ? "bg-orange-400 text-white"
+                              : s === step
+                              ? "bg-orange-400/20 text-orange-400 border-2 border-orange-400"
+                              : "bg-gray-800 text-gray-500"
+                          }`}
+                        >
+                          {s}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Step 1: Select Split */}
-            {step === 1 && (
+            {step === 1 && !isEditing && (
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-white mb-4">
+                <h3 className="text-base sm:text-lg font-semibold text-white mb-4">
                   Selecciona tu tipo de rutina
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   {(Object.keys(SPLITS) as Array<keyof typeof SPLITS>).map(
                     (key) => (
                       <button
                         key={key}
                         type="button"
                         onClick={() => handleSplitSelect(key)}
-                        className="p-6 bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 hover:border-orange-400/50 rounded-xl text-left transition-all group"
+                        className="p-4 sm:p-6 bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 hover:border-orange-400/50 rounded-xl text-left transition-all group"
                       >
-                        <h4 className="text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition-colors">
+                        <h4 className="text-lg sm:text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition-colors">
                           {SPLITS[key].name}
                         </h4>
-                        <p className="text-gray-400 text-sm">
+                        <p className="text-gray-400 text-xs sm:text-sm">
                           {SPLITS[key].description}
                         </p>
                       </button>
@@ -646,7 +761,7 @@ export default function PlanPage() {
                       setShowForm(false);
                       setStep(1);
                     }}
-                    className="w-full mt-4 px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors"
+                    className="w-full mt-4 px-4 sm:px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors text-sm sm:text-base"
                   >
                     Cancelar
                   </button>
@@ -655,30 +770,30 @@ export default function PlanPage() {
             )}
 
             {/* Step 2: Assign Week Days */}
-            {step === 2 && (
-              <div className="space-y-6">
+            {step === 2 && !isEditing && (
+              <div className="space-y-4 sm:space-y-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-white mb-2">
                     Asignar Días de la Semana
                   </h3>
-                  <p className="text-gray-400 text-sm mb-4">
+                  <p className="text-gray-400 text-xs sm:text-sm mb-4">
                     Asigna qué día de la semana harás cada entrenamiento de{" "}
                     {selectedSplit && SPLITS[selectedSplit].name}
                   </p>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {dayExercises.map((day, index) => (
                     <div
                       key={index}
-                      className="p-4 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg border border-gray-800/50"
+                      className="p-3 sm:p-4 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg border border-gray-800/50"
                     >
-                      <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
                         <div className="flex-1">
-                          <h4 className="text-white font-semibold mb-1">
+                          <h4 className="text-white font-semibold mb-1 text-sm sm:text-base">
                             {day.dayName}
                           </h4>
-                          <p className="text-gray-500 text-sm">
+                          <p className="text-gray-500 text-xs sm:text-sm">
                             {day.exercises.length} ejercicios
                           </p>
                         </div>
@@ -687,7 +802,7 @@ export default function PlanPage() {
                           onChange={(e) =>
                             handleAssignWeekDay(index, e.target.value)
                           }
-                          className="px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                          className="w-full sm:w-auto px-3 sm:px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent text-sm sm:text-base"
                         >
                           <option value="">Seleccionar día</option>
                           {DAYS_OF_WEEK.map((weekDay) => (
@@ -701,18 +816,18 @@ export default function PlanPage() {
                   ))}
                 </div>
 
-                <div className="flex gap-4 pt-4">
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4">
                   <button
                     type="button"
                     onClick={() => setStep(1)}
-                    className="px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors"
+                    className="px-4 sm:px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors text-sm sm:text-base"
                   >
                     Atrás
                   </button>
                   <button
                     type="button"
                     onClick={handleDaysConfirm}
-                    className="flex-1 px-6 py-3 bg-orange-400 hover:bg-orange-500 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-orange-400/20"
+                    className="flex-1 px-4 sm:px-6 py-3 bg-orange-400 hover:bg-orange-500 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-orange-400/20 text-sm sm:text-base"
                   >
                     Continuar a Ejercicios
                   </button>
@@ -722,61 +837,71 @@ export default function PlanPage() {
 
             {/* Step 3: Edit Exercises by Day */}
             {step === 3 && (
-              <div className="space-y-6">
+              <div className="space-y-4 sm:space-y-6">
                 {/* Day Navigation */}
                 <div>
-                  <h3 className="text-lg font-semibold text-white mb-4">
-                    Editar Ejercicios por Día
+                  <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
+                    {isEditing
+                      ? "Editar Ejercicios"
+                      : "Editar Ejercicios por Día"}
                   </h3>
-                  <div className="flex gap-2 overflow-x-auto pb-2">
+                  <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
                     {dayExercises.map((day, index) => (
                       <button
                         key={index}
                         type="button"
                         onClick={() => setCurrentDayIndex(index)}
-                        className={`px-4 py-2 rounded-lg border transition-all whitespace-nowrap ${
+                        className={`px-3 sm:px-4 py-2 rounded-lg border transition-all whitespace-nowrap text-xs sm:text-sm ${
                           currentDayIndex === index
                             ? "bg-orange-400 border-orange-400 text-white font-semibold"
                             : "bg-[#0f0f0f] border-gray-800/50 text-gray-400 hover:border-orange-400/50"
                         }`}
                       >
-                        <div className="text-sm">{day.weekDay}</div>
-                        <div className="text-xs opacity-75">{day.dayName}</div>
+                        <div className="text-sm sm:text-base">
+                          {day.weekDay}
+                        </div>
+                        {day.dayName && (
+                          <div className="text-xs opacity-75">
+                            {day.dayName}
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
                 </div>
 
                 {/* Current Day Exercises */}
-                <div className="bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-xl p-6 border border-gray-800/50">
+                <div className="bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-xl p-4 sm:p-6 border border-gray-800/50">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h4 className="text-white font-semibold">
-                        {dayExercises[currentDayIndex].dayName}
-                      </h4>
-                      <p className="text-gray-500 text-sm">
+                      {dayExercises[currentDayIndex].dayName && (
+                        <h4 className="text-white font-semibold text-sm sm:text-base">
+                          {dayExercises[currentDayIndex].dayName}
+                        </h4>
+                      )}
+                      <p className="text-gray-500 text-xs sm:text-sm">
                         {dayExercises[currentDayIndex].weekDay}
                       </p>
                     </div>
-                    <span className="text-orange-400 text-sm font-semibold">
+                    <span className="text-orange-400 text-xs sm:text-sm font-semibold">
                       {dayExercises[currentDayIndex].exercises.length}{" "}
                       ejercicios
                     </span>
                   </div>
 
-                  <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                  <div className="space-y-2 sm:space-y-3 max-h-96 overflow-y-auto pr-2">
                     {dayExercises[currentDayIndex].exercises.map(
                       (exercise, index) => (
                         <div
                           key={index}
-                          className="flex gap-2 items-start p-3 bg-[#0a0a0a] rounded-lg border border-gray-800/50"
+                          className="flex gap-2 items-start p-2 sm:p-3 bg-[#0a0a0a] rounded-lg border border-gray-800/50"
                         >
-                          <div className="w-8 h-8 rounded-full bg-blue-400/10 flex items-center justify-center shrink-0">
-                            <span className="text-blue-400 font-semibold text-sm">
+                          <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-blue-400/10 flex items-center justify-center shrink-0">
+                            <span className="text-blue-400 font-semibold text-xs sm:text-sm">
                               {index + 1}
                             </span>
                           </div>
-                          <div className="flex-1 space-y-2">
+                          <div className="flex-1 space-y-2 min-w-0">
                             <input
                               type="text"
                               value={exercise.name}
@@ -788,14 +913,14 @@ export default function PlanPage() {
                                 )
                               }
                               placeholder="Nombre del ejercicio"
-                              className="w-full px-3 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent text-sm"
+                              className="w-full px-3 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent text-xs sm:text-sm"
                             />
                             {/* Exercise Selector */}
-                            <details className="text-sm">
+                            <details className="text-xs sm:text-sm">
                               <summary className="text-gray-400 hover:text-white cursor-pointer">
                                 Seleccionar de la lista
                               </summary>
-                              <div className="mt-2 grid grid-cols-2 gap-2 p-2 bg-[#0f0f0f] rounded-lg border border-gray-800/50">
+                              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 bg-[#0f0f0f] rounded-lg border border-gray-800/50 max-h-60 overflow-y-auto">
                                 {Object.entries(EXERCISES_BY_MUSCLE).map(
                                   ([muscle, exercises]) => (
                                     <div key={muscle} className="space-y-1">
@@ -823,7 +948,7 @@ export default function PlanPage() {
                               </div>
                             </details>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-col sm:flex-row items-center gap-2 shrink-0">
                             <input
                               type="number"
                               value={exercise.series}
@@ -835,10 +960,12 @@ export default function PlanPage() {
                                 )
                               }
                               min="1"
-                              className="w-16 px-3 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-pink-400 text-center focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent text-sm font-semibold"
+                              className="w-12 sm:w-16 px-2 sm:px-3 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-pink-400 text-center focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent text-xs sm:text-sm font-semibold"
                               title="Series"
                             />
-                            <span className="text-gray-500 text-xs">×</span>
+                            <span className="text-gray-500 text-xs hidden sm:inline">
+                              ×
+                            </span>
                             <input
                               type="number"
                               value={exercise.reps}
@@ -850,7 +977,7 @@ export default function PlanPage() {
                                 )
                               }
                               min="1"
-                              className="w-16 px-3 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-purple-400 text-center focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent text-sm font-semibold"
+                              className="w-12 sm:w-16 px-2 sm:px-3 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-purple-400 text-center focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent text-xs sm:text-sm font-semibold"
                               title="Repeticiones"
                             />
                           </div>
@@ -860,7 +987,7 @@ export default function PlanPage() {
                             className="p-2 bg-red-400/10 border border-red-400/20 rounded-lg text-red-400 hover:bg-red-400/20 transition-colors shrink-0"
                           >
                             <svg
-                              className="w-4 h-4"
+                              className="w-3 h-3 sm:w-4 sm:h-4"
                               fill="none"
                               stroke="currentColor"
                               viewBox="0 0 24 24"
@@ -881,27 +1008,42 @@ export default function PlanPage() {
                   <button
                     type="button"
                     onClick={() => handleAddExercise()}
-                    className="w-full mt-4 px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-gray-400 hover:text-white hover:border-orange-400/50 transition-all"
+                    className="w-full mt-4 px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-gray-400 hover:text-white hover:border-orange-400/50 transition-all text-sm sm:text-base"
                   >
                     + Agregar Ejercicio
                   </button>
                 </div>
 
                 {/* Navigation */}
-                <div className="flex gap-4 pt-4">
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4">
+                  {!isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="px-4 sm:px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors text-sm sm:text-base"
+                    >
+                      Atrás
+                    </button>
+                  )}
+                  {isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false);
+                        setIsEditing(false);
+                        setStep(1);
+                      }}
+                      className="px-4 sm:px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors text-sm sm:text-base"
+                    >
+                      Cancelar
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setStep(2)}
-                    className="px-6 py-3 bg-[#0f0f0f] border border-gray-800/50 text-gray-400 hover:text-white rounded-lg transition-colors"
+                    onClick={isEditing ? handleUpdatePlan : handleSubmit}
+                    className="flex-1 px-4 sm:px-6 py-3 bg-orange-400 hover:bg-orange-500 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-orange-400/20 text-sm sm:text-base"
                   >
-                    Atrás
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    className="flex-1 px-6 py-3 bg-orange-400 hover:bg-orange-500 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-orange-400/20"
-                  >
-                    Crear Plan
+                    {isEditing ? "Guardar Cambios" : "Crear Plan"}
                   </button>
                 </div>
               </div>

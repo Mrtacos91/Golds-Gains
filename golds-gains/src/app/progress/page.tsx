@@ -3,13 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import {
-  saveOfflineWorkout,
-  getPendingWorkouts,
-  markAsSynced,
-  deleteSyncedWorkout,
-  getPendingCount,
-} from "@/lib/offlineDB";
 
 interface Plan {
   id: number;
@@ -89,33 +82,9 @@ export default function ProgressPage() {
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [existingWorkout, setExistingWorkout] = useState<Workout | null>(null);
   const [isToday, setIsToday] = useState(true);
-  const [isOnline, setIsOnline] = useState(true);
-  const [pendingSync, setPendingSync] = useState(0);
-  const [syncMessage, setSyncMessage] = useState("");
 
   useEffect(() => {
     loadPlan();
-    checkOnlineStatus();
-    loadPendingCount();
-
-    // Listener para cambios de conexión
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    // Listener para sincronización
-    window.addEventListener(
-      "sync-workouts",
-      handleSyncWorkouts as EventListener
-    );
-
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-      window.removeEventListener(
-        "sync-workouts",
-        handleSyncWorkouts as EventListener
-      );
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -163,131 +132,6 @@ export default function ProgressPage() {
   const checkIfToday = () => {
     const today = getLocalDate();
     setIsToday(selectedDate === today);
-  };
-
-  const checkOnlineStatus = () => {
-    setIsOnline(navigator.onLine);
-  };
-
-  const loadPendingCount = async () => {
-    try {
-      const count = await getPendingCount();
-      setPendingSync(count);
-    } catch (error) {
-      console.error("[Offline] Error al cargar contador pendiente:", error);
-    }
-  };
-
-  const handleOnline = () => {
-    console.log("[Offline] Conexión restaurada");
-    setIsOnline(true);
-    handleSyncWorkouts();
-  };
-
-  const handleOffline = () => {
-    console.log("[Offline] Sin conexión");
-    setIsOnline(false);
-  };
-
-  const handleSyncWorkouts = async () => {
-    console.log("[Offline] Iniciando sincronización...");
-
-    try {
-      const pendingWorkouts = await getPendingWorkouts();
-
-      if (pendingWorkouts.length === 0) {
-        console.log("[Offline] No hay workouts pendientes de sincronizar");
-        return;
-      }
-
-      console.log(
-        `[Offline] Sincronizando ${pendingWorkouts.length} workouts...`
-      );
-
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const pending of pendingWorkouts) {
-        try {
-          const workoutData = pending.workoutData;
-
-          // Intentar guardar en Supabase
-          if (workoutData.isUpdate) {
-            // Actualizar workout existente
-            const { error } = await supabase
-              .from("workout")
-              .update({
-                exercises: workoutData.exercises,
-                series: workoutData.series,
-                reps: workoutData.reps,
-                status: workoutData.status,
-                weight: workoutData.weight,
-                rir: workoutData.rir,
-                completed_at: workoutData.completed_at,
-                its_done: workoutData.its_done,
-              })
-              .eq("id", workoutData.id);
-
-            if (error) throw error;
-          } else {
-            // Crear nuevo workout
-            const { error } = await supabase.from("workout").insert({
-              user_id: workoutData.user_id,
-              split: workoutData.split,
-              exercises: workoutData.exercises,
-              series: workoutData.series,
-              reps: workoutData.reps,
-              days: workoutData.days,
-              status: workoutData.status,
-              weight: workoutData.weight,
-              rir: workoutData.rir,
-              completed_at: workoutData.completed_at,
-              its_done: workoutData.its_done,
-              created_at: workoutData.created_at,
-            });
-
-            if (error) throw error;
-          }
-
-          // Marcar como sincronizado y eliminar
-          await markAsSynced(pending.id!);
-          await deleteSyncedWorkout(pending.id!);
-          successCount++;
-
-          console.log(`[Offline] ✅ Workout ${pending.id} sincronizado`);
-        } catch (error) {
-          console.error(
-            `[Offline] ❌ Error al sincronizar workout ${pending.id}:`,
-            error
-          );
-          errorCount++;
-        }
-      }
-
-      // Actualizar contador
-      await loadPendingCount();
-
-      // Mostrar mensaje
-      if (successCount > 0) {
-        setSyncMessage(
-          `✅ ${successCount} registro${
-            successCount > 1 ? "s" : ""
-          } sincronizado${successCount > 1 ? "s" : ""}`
-        );
-        setTimeout(() => setSyncMessage(""), 5000);
-
-        // Recargar datos
-        await loadExercisesForDay();
-      }
-
-      if (errorCount > 0) {
-        console.warn(
-          `[Offline] ${errorCount} workouts no pudieron sincronizarse`
-        );
-      }
-    } catch (error) {
-      console.error("[Offline] Error en sincronización:", error);
-    }
   };
 
   const loadExercisesForDay = async () => {
@@ -595,7 +439,6 @@ export default function ProgressPage() {
       isToday,
       existingWorkout: existingWorkout?.id,
       exercisesCount: exercises.length,
-      isOnline,
     });
 
     // Validar que solo se pueda guardar registros de hoy
@@ -697,35 +540,7 @@ export default function ProgressPage() {
         id: existingWorkout?.id,
       };
 
-      // Si está offline, guardar en IndexedDB
-      if (!isOnline) {
-        console.log("[handleSubmit] 📴 Sin conexión, guardando en IndexedDB");
-        try {
-          const offlineId = await saveOfflineWorkout(workoutData);
-          await loadPendingCount();
-
-          console.log("[handleSubmit] ✅ Guardado offline, ID:", offlineId);
-
-          // Mostrar mensaje de éxito offline
-          setSyncMessage(
-            "📴 Guardado offline. Se sincronizará automáticamente cuando haya conexión."
-          );
-          setTimeout(() => setSyncMessage(""), 5000);
-
-          setShowSuccessMessage(true);
-          setTimeout(() => setShowSuccessMessage(false), 2000);
-        } catch (_offlineError) {
-          console.error(
-            "[handleSubmit] ❌ Error al guardar offline:",
-            _offlineError
-          );
-          alert("Error al guardar offline. Intenta de nuevo.");
-        }
-        setSaving(false);
-        return;
-      }
-
-      // Si está online, guardar directamente en Supabase
+      // Guardar directamente en Supabase
       let error;
       let savedWorkoutId = existingWorkout?.id;
 
@@ -788,27 +603,7 @@ export default function ProgressPage() {
 
       if (error) {
         console.error("[handleSubmit] ❌ Error al guardar workout:", error);
-
-        // Si falla guardar online, intentar guardar offline
-        console.log("[handleSubmit] Intentando guardar offline como backup...");
-        try {
-          const offlineId = await saveOfflineWorkout(workoutData);
-          await loadPendingCount();
-
-          console.log(
-            "[handleSubmit] ✅ Guardado offline como backup, ID:",
-            offlineId
-          );
-          setSyncMessage(
-            "⚠️ Error de conexión. Guardado offline y se sincronizará después."
-          );
-          setTimeout(() => setSyncMessage(""), 5000);
-
-          setShowSuccessMessage(true);
-          setTimeout(() => setShowSuccessMessage(false), 2000);
-        } catch (_offlineError) {
-          alert("Error al guardar el registro: " + error.message);
-        }
+        alert("Error al guardar el registro: " + error.message);
       } else {
         console.log(
           `[handleSubmit] ✅ Registro guardado exitosamente. its_done=${allDone}`
@@ -827,75 +622,7 @@ export default function ProgressPage() {
       }
     } catch (error) {
       console.error("[handleSubmit] ❌ Error inesperado:", error);
-
-      // Intentar guardar offline como último recurso
-      console.log("[handleSubmit] Guardando offline como último recurso...");
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        if (user) {
-          const exerciseNames: string[] = [];
-          const seriesNumbers: number[] = [];
-          const repsArray: number[] = [];
-          const weightArray: string[] = [];
-          const rirArray: number[] = [];
-          const completedAtArray: (string | null)[] = [];
-          const statusArray: string[] = [];
-          const daysArray: string[] = [];
-
-          exercises.forEach((exercise) => {
-            exercise.seriesData.forEach((series, seriesIndex) => {
-              exerciseNames.push(exercise.name);
-              seriesNumbers.push(seriesIndex + 1);
-              repsArray.push(series.reps);
-              weightArray.push(
-                series.weight ? `${series.weight} ${weightUnit}` : ""
-              );
-              rirArray.push(series.rir);
-              completedAtArray.push(series.completedAt);
-              statusArray.push(series.reps > 0 ? "completado" : "pendiente");
-              daysArray.push(selectedDay);
-            });
-          });
-
-          const allDone = exercises.every((ex) => ex.status === "completado");
-          const workoutDateTimeISO = `${selectedDate}T${selectedTime}:00.000`;
-
-          const workoutData = {
-            user_id: user.id,
-            split: plan.split,
-            exercises: exerciseNames,
-            series: seriesNumbers,
-            reps: repsArray,
-            days: daysArray,
-            status: statusArray,
-            weight: weightArray,
-            rir: rirArray,
-            completed_at: completedAtArray,
-            its_done: allDone,
-            created_at: workoutDateTimeISO,
-            isUpdate: !!existingWorkout,
-            id: existingWorkout?.id,
-          };
-
-          await saveOfflineWorkout(workoutData);
-          await loadPendingCount();
-
-          setSyncMessage(
-            "⚠️ Guardado offline. Se sincronizará cuando haya conexión."
-          );
-          setTimeout(() => setSyncMessage(""), 5000);
-
-          setShowSuccessMessage(true);
-          setTimeout(() => setShowSuccessMessage(false), 2000);
-        } else {
-          alert("Error al guardar el registro");
-        }
-      } catch (_offlineError) {
-        alert("Error al guardar el registro");
-      }
+      alert("Error al guardar el registro");
     } finally {
       setSaving(false);
     }
@@ -977,13 +704,13 @@ export default function ProgressPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] p-6">
+    <div className="min-h-screen bg-[#0a0a0a] p-3 sm:p-4 lg:p-6">
       {/* Success Message */}
       {showSuccessMessage && (
-        <div className="fixed top-6 right-6 z-50 animate-slideIn">
-          <div className="bg-linear-to-r from-green-400 to-emerald-500 text-white px-6 py-4 rounded-lg shadow-2xl shadow-green-400/50 flex items-center gap-3">
+        <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50 animate-slideIn w-[calc(100%-2rem)] sm:w-auto">
+          <div className="bg-linear-to-r from-green-400 to-emerald-500 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-lg shadow-2xl shadow-green-400/50 flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
             <svg
-              className="w-6 h-6 animate-checkmark"
+              className="w-5 h-5 sm:w-6 sm:h-6 animate-checkmark shrink-0"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -997,7 +724,7 @@ export default function ProgressPage() {
             </svg>
             <div>
               <p className="font-bold">¡Registro guardado!</p>
-              <p className="text-sm opacity-90">
+              <p className="opacity-90">
                 Tu progreso ha sido registrado exitosamente
               </p>
             </div>
@@ -1005,39 +732,15 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Sync Message */}
-      {syncMessage && (
-        <div className="fixed top-6 right-6 z-50 animate-slideIn">
-          <div className="bg-linear-to-r from-blue-400 to-cyan-500 text-white px-6 py-4 rounded-lg shadow-2xl shadow-blue-400/50 flex items-center gap-3">
-            <svg
-              className="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <div>
-              <p className="font-bold text-sm">{syncMessage}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4 sm:mb-6">
           <button
             onClick={() => router.push("/home")}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm sm:text-base"
           >
             <svg
-              className="w-5 h-5"
+              className="w-4 h-4 sm:w-5 sm:h-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -1049,49 +752,17 @@ export default function ProgressPage() {
                 d="M15 19l-7-7 7-7"
               />
             </svg>
-            Volver
+            <span className="hidden sm:inline">Volver</span>
           </button>
-
-          {/* Online/Offline Status & Pending Sync */}
-          <div className="flex items-center gap-3">
-            {!isOnline && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-orange-400/10 border border-orange-400/30 rounded-lg">
-                <div className="w-2 h-2 bg-orange-400 rounded-full animate-pulse"></div>
-                <span className="text-orange-400 text-sm font-medium">
-                  Modo Offline
-                </span>
-              </div>
-            )}
-            {pendingSync > 0 && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-blue-400/10 border border-blue-400/30 rounded-lg">
-                <svg
-                  className="w-4 h-4 text-blue-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-                <span className="text-blue-400 text-sm font-medium">
-                  {pendingSync} pendiente{pendingSync > 1 ? "s" : ""}
-                </span>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Main Card */}
-        <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-8 border border-gray-800/50 shadow-xl animate-fadeIn">
+        <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-4 sm:p-6 lg:p-8 border border-gray-800/50 shadow-xl animate-fadeIn">
           {/* Title */}
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-full bg-pink-400/10 flex items-center justify-center animate-pulse">
+          <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-pink-400/10 flex items-center justify-center animate-pulse shrink-0">
               <svg
-                className="w-6 h-6 text-pink-400"
+                className="w-5 h-5 sm:w-6 sm:h-6 text-pink-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -1104,24 +775,26 @@ export default function ProgressPage() {
                 />
               </svg>
             </div>
-            <div>
-              <h2 className="text-2xl font-bold text-white">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-2xl font-bold text-white">
                 Registrar Progreso
               </h2>
-              <p className="text-gray-400 text-sm">{plan.split}</p>
+              <p className="text-gray-400 text-xs sm:text-sm truncate">
+                {plan.split}
+              </p>
             </div>
           </div>
 
           {/* Day, Date, Time and Weight Unit Selector */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div className="animate-fadeIn">
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-400 mb-1.5 sm:mb-2">
                 Día de Entrenamiento
               </label>
               <select
                 value={selectedDay}
                 onChange={(e) => setSelectedDay(e.target.value)}
-                className="w-full px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
               >
                 {DAYS_OF_WEEK.map((day) => (
                   <option key={day} value={day}>
@@ -1132,7 +805,7 @@ export default function ProgressPage() {
             </div>
 
             <div className="animate-fadeIn" style={{ animationDelay: "0.1s" }}>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-400 mb-1.5 sm:mb-2">
                 Fecha del Entrenamiento
               </label>
               <input
@@ -1140,30 +813,30 @@ export default function ProgressPage() {
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 max={getLocalDate()}
-                className="w-full px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
               />
             </div>
 
             <div className="animate-fadeIn" style={{ animationDelay: "0.2s" }}>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-400 mb-1.5 sm:mb-2">
                 Hora del Entrenamiento
               </label>
               <input
                 type="time"
                 value={selectedTime}
                 onChange={(e) => setSelectedTime(e.target.value)}
-                className="w-full px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
               />
             </div>
 
             <div className="animate-fadeIn" style={{ animationDelay: "0.3s" }}>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-400 mb-1.5 sm:mb-2">
                 Unidad de Peso
               </label>
               <select
                 value={weightUnit}
                 onChange={(e) => setWeightUnit(e.target.value as "kg" | "lb")}
-                className="w-full px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all"
               >
                 <option value="kg">Kilogramos (kg)</option>
                 <option value="lb">Libras (lb)</option>
@@ -1173,11 +846,11 @@ export default function ProgressPage() {
 
           {/* Completed Day Banner */}
           {existingWorkout && existingWorkout.its_done && (
-            <div className="mb-6 p-4 bg-linear-to-r from-green-400/10 to-emerald-500/10 border-2 border-green-400/50 rounded-lg animate-fadeIn">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-green-400/20 flex items-center justify-center">
+            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-linear-to-r from-green-400/10 to-emerald-500/10 border-2 border-green-400/50 rounded-lg animate-fadeIn">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-green-400/20 flex items-center justify-center shrink-0">
                   <svg
-                    className="w-6 h-6 text-green-400"
+                    className="w-5 h-5 sm:w-6 sm:h-6 text-green-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1190,11 +863,11 @@ export default function ProgressPage() {
                     />
                   </svg>
                 </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-bold text-green-400">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm sm:text-lg font-bold text-green-400">
                     ¡Día Completado! 🎉
                   </h3>
-                  <p className="text-sm text-gray-400">
+                  <p className="text-xs sm:text-sm text-gray-400">
                     Completaste todos los ejercicios de este día
                   </p>
                 </div>
@@ -1204,11 +877,11 @@ export default function ProgressPage() {
 
           {/* Warning for Past Days */}
           {!isToday && (
-            <div className="mb-6 p-4 bg-linear-to-r from-orange-400/10 to-yellow-500/10 border-2 border-orange-400/50 rounded-lg animate-fadeIn">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-orange-400/20 flex items-center justify-center">
+            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-linear-to-r from-orange-400/10 to-yellow-500/10 border-2 border-orange-400/50 rounded-lg animate-fadeIn">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-orange-400/20 flex items-center justify-center shrink-0">
                   <svg
-                    className="w-5 h-5 text-orange-400"
+                    className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1221,8 +894,8 @@ export default function ProgressPage() {
                     />
                   </svg>
                 </div>
-                <div className="flex-1">
-                  <h3 className="text-sm font-bold text-orange-400">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xs sm:text-sm font-bold text-orange-400">
                     Día Anterior - Solo Lectura
                   </h3>
                   <p className="text-xs text-gray-400">
@@ -1237,24 +910,24 @@ export default function ProgressPage() {
 
           {/* Progress Bar */}
           {exercises.length > 0 && (
-            <div className="mb-6 p-4 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg border border-gray-800/50 animate-fadeIn">
+            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg border border-gray-800/50 animate-fadeIn">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-400">
+                <span className="text-xs sm:text-sm font-medium text-gray-400">
                   Progreso del Día
                 </span>
-                <span className="text-sm font-semibold text-pink-400 animate-pulse">
+                <span className="text-xs sm:text-sm font-semibold text-pink-400 animate-pulse">
                   {exercises.filter((e) => e.status === "completado").length} /{" "}
-                  {exercises.length} ejercicios
+                  {exercises.length}
                 </span>
               </div>
-              <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden">
+              <div className="w-full h-2 sm:h-3 bg-gray-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-linear-to-r from-pink-400 to-purple-400 transition-all duration-700 ease-out"
                   style={{ width: `${getProgressPercentage()}%` }}
                 ></div>
               </div>
               <div className="mt-2 text-center">
-                <span className="text-2xl font-bold text-pink-400 animate-bounce">
+                <span className="text-xl sm:text-2xl font-bold text-pink-400 animate-bounce">
                   {getProgressPercentage()}%
                 </span>
               </div>
@@ -1263,14 +936,14 @@ export default function ProgressPage() {
 
           {/* Exercises List */}
           {exercises.length > 0 ? (
-            <div className="space-y-6 mb-6">
-              <h3 className="text-lg font-semibold text-white animate-fadeIn">
+            <div className="space-y-3 sm:space-y-6 mb-4 sm:mb-6">
+              <h3 className="text-base sm:text-lg font-semibold text-white animate-fadeIn">
                 Ejercicios de {selectedDay}
               </h3>
               {exercises.map((exercise, exerciseIndex) => (
                 <div
                   key={exerciseIndex}
-                  className={`p-6 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg border transition-all duration-300 animate-slideIn ${
+                  className={`p-3 sm:p-6 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg border transition-all duration-300 animate-slideIn ${
                     exercise.status === "completado"
                       ? "border-green-400/50 bg-green-400/5"
                       : "border-gray-800/50 hover:border-pink-400/50"
@@ -1278,8 +951,8 @@ export default function ProgressPage() {
                   style={{ animationDelay: `${exerciseIndex * 0.05}s` }}
                 >
                   {/* Exercise Header */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-start justify-between mb-3 sm:mb-4 gap-2">
+                    <div className="flex items-start gap-2 sm:gap-3 min-w-0">
                       <button
                         onClick={() =>
                           handleMarkAllSeriesAsCompleted(exerciseIndex)
@@ -1289,7 +962,7 @@ export default function ProgressPage() {
                           (existingWorkout && existingWorkout.its_done) ||
                           false
                         }
-                        className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-300 transform ${
+                        className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-300 transform ${
                           !isToday ||
                           (existingWorkout && existingWorkout.its_done)
                             ? "cursor-not-allowed opacity-50"
@@ -1302,7 +975,7 @@ export default function ProgressPage() {
                       >
                         {exercise.status === "completado" && (
                           <svg
-                            className="w-5 h-5 text-green-400 animate-checkmark"
+                            className="w-4 h-4 sm:w-5 sm:h-5 text-green-400 animate-checkmark"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -1316,9 +989,9 @@ export default function ProgressPage() {
                           </svg>
                         )}
                       </button>
-                      <div>
+                      <div className="min-w-0">
                         <h4
-                          className={`font-semibold text-lg transition-all duration-300 ${
+                          className={`font-semibold text-sm sm:text-lg transition-all duration-300 truncate ${
                             exercise.status === "completado"
                               ? "text-gray-500 line-through"
                               : "text-white"
@@ -1327,25 +1000,24 @@ export default function ProgressPage() {
                           {exercise.name}
                         </h4>
                         <p className="text-xs text-gray-500">
-                          {exercise.plannedSeries} series ×{" "}
-                          {exercise.plannedReps} reps
+                          {exercise.plannedSeries} × {exercise.plannedReps}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Series List */}
-                  <div className="space-y-3">
+                  <div className="space-y-2 sm:space-y-3">
                     {exercise.seriesData.map((series, seriesIndex) => (
                       <div
                         key={seriesIndex}
-                        className={`p-4 bg-[#0a0a0a] rounded-lg border transition-all ${
+                        className={`p-2 sm:p-4 bg-[#0a0a0a] rounded-lg border transition-all ${
                           series.reps > 0
                             ? "border-green-400/30 bg-green-400/5"
                             : "border-gray-800/50"
                         }`}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                           {/* Series Number & Checkbox */}
                           <button
                             onClick={() =>
@@ -1359,7 +1031,7 @@ export default function ProgressPage() {
                               (existingWorkout && existingWorkout.its_done) ||
                               false
                             }
-                            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
                               !isToday ||
                               (existingWorkout && existingWorkout.its_done)
                                 ? "cursor-not-allowed opacity-50"
@@ -1372,7 +1044,7 @@ export default function ProgressPage() {
                           >
                             {series.reps > 0 ? (
                               <svg
-                                className="w-4 h-4 text-green-400"
+                                className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -1385,17 +1057,17 @@ export default function ProgressPage() {
                                 />
                               </svg>
                             ) : (
-                              <span className="text-xs text-gray-500 font-semibold">
+                              <span className="text-xs font-semibold text-gray-500">
                                 {seriesIndex + 1}
                               </span>
                             )}
                           </button>
 
                           {/* Series Data Inputs */}
-                          <div className="flex-1 grid grid-cols-3 gap-2">
+                          <div className="flex-1 grid grid-cols-3 gap-1.5 sm:gap-2 min-w-0">
                             {/* Reps */}
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">
+                            <div className="min-w-0">
+                              <label className="block text-xs text-gray-500 mb-0.5">
                                 Reps
                               </label>
                               <input
@@ -1417,14 +1089,14 @@ export default function ProgressPage() {
                                     existingWorkout.its_done) ||
                                   false
                                 }
-                                className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full px-1.5 sm:px-2 py-1 sm:py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </div>
 
                             {/* Weight */}
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">
-                                Peso ({weightUnit})
+                            <div className="min-w-0">
+                              <label className="block text-xs text-gray-500 mb-0.5">
+                                {weightUnit}
                               </label>
                               <input
                                 type="number"
@@ -1446,13 +1118,13 @@ export default function ProgressPage() {
                                     existingWorkout.its_done) ||
                                   false
                                 }
-                                className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full px-1.5 sm:px-2 py-1 sm:py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </div>
 
                             {/* RIR */}
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">
+                            <div className="min-w-0">
+                              <label className="block text-xs text-gray-500 mb-0.5">
                                 RIR
                               </label>
                               <input
@@ -1475,14 +1147,14 @@ export default function ProgressPage() {
                                     existingWorkout.its_done) ||
                                   false
                                 }
-                                className="w-full px-2 py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full px-1.5 sm:px-2 py-1 sm:py-1.5 bg-[#0f0f0f] border border-gray-800/50 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </div>
                           </div>
 
                           {/* Completion Time */}
                           {series.completedAt && (
-                            <div className="text-xs text-green-400 whitespace-nowrap">
+                            <div className="text-xs text-green-400 whitespace-nowrap ml-auto">
                               {new Date(series.completedAt).toLocaleTimeString(
                                 "es-ES",
                                 {
@@ -1500,10 +1172,10 @@ export default function ProgressPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-12 animate-fadeIn">
-              <div className="w-16 h-16 rounded-full bg-gray-800/50 flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <div className="text-center py-8 sm:py-12 animate-fadeIn">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gray-800/50 flex items-center justify-center mx-auto mb-3 sm:mb-4 animate-pulse">
                 <svg
-                  className="w-8 h-8 text-gray-600"
+                  className="w-6 h-6 sm:w-8 sm:h-8 text-gray-600"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -1516,10 +1188,10 @@ export default function ProgressPage() {
                   />
                 </svg>
               </div>
-              <p className="text-gray-400">
+              <p className="text-gray-400 text-sm">
                 No hay ejercicios programados para {selectedDay}
               </p>
-              <p className="text-gray-600 text-sm mt-2">
+              <p className="text-gray-600 text-xs mt-1 sm:mt-2">
                 Selecciona otro día de la semana
               </p>
             </div>
@@ -1527,21 +1199,21 @@ export default function ProgressPage() {
 
           {/* Submit Button */}
           {exercises.length > 0 && (
-            <div className="flex gap-4 animate-fadeIn">
+            <div className="flex gap-3 sm:gap-4 animate-fadeIn">
               <button
                 onClick={handleSubmit}
                 disabled={saving}
-                className="flex-1 px-6 py-4 bg-linear-to-r from-pink-400 to-purple-400 hover:from-pink-500 hover:to-purple-500 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg shadow-pink-400/20 hover:shadow-pink-400/40 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="flex-1 px-4 sm:px-6 py-3 sm:py-4 bg-linear-to-r from-pink-400 to-purple-400 hover:from-pink-500 hover:to-purple-500 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg shadow-pink-400/20 hover:shadow-pink-400/40 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 text-sm sm:text-base"
               >
                 {saving ? (
                   <span className="flex items-center justify-center gap-2">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    Guardando...
+                    <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-white"></div>
+                    <span className="hidden sm:inline">Guardando...</span>
                   </span>
                 ) : (
                   <span className="flex items-center justify-center gap-2">
                     <svg
-                      className="w-5 h-5"
+                      className="w-4 h-4 sm:w-5 sm:h-5"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -1553,7 +1225,8 @@ export default function ProgressPage() {
                         d="M5 13l4 4L19 7"
                       />
                     </svg>
-                    Guardar Registro
+                    <span className="hidden sm:inline">Guardar Registro</span>
+                    <span className="sm:hidden">Guardar</span>
                   </span>
                 )}
               </button>

@@ -1,7 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import PWARegister from "./components/PWARegister";
 import RouteTransitionWrapper from "./RouteTransitionWrapper";
 
 const geistSans = Geist({
@@ -27,13 +26,18 @@ export const metadata: Metadata = {
     apple: [{ url: "/logo.png", sizes: "180x180", type: "image/png" }],
     shortcut: "/logo.png",
   },
-  themeColor: "#fb923c",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Gold's Gains",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#fb923c",
 };
 
 export default function RootLayout({
@@ -55,7 +59,6 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <PWARegister />
         <RouteTransitionWrapper>{children}</RouteTransitionWrapper>
       </body>
     </html>

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.76.1",
     "bcryptjs": "^3.0.2",
     "lucide-react": "^0.546.0",
