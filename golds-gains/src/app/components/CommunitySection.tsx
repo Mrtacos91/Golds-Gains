@@ -40,6 +40,7 @@ interface Report {
   report_text: string;
   reported_at: string;
   section: string;
+  likes?: number;
   users?: { name: string };
 }
 
@@ -50,6 +51,7 @@ interface SharedRoutine {
   difficulty: string;
   duration: string;
   shared_at: string;
+  likes?: number;
   users?: { name: string };
 }
 
@@ -80,6 +82,9 @@ export default function CommunitySection() {
   const [animatingLikes, setAnimatingLikes] = useState<number[]>([]);
   const [animatingUnlikes, setAnimatingUnlikes] = useState<number[]>([]);
   const [likedPlaylists, setLikedPlaylists] = useState<number[]>([]);
+  const [likedSuggestions, setLikedSuggestions] = useState<number[]>([]);
+  const [likedReports, setLikedReports] = useState<number[]>([]);
+  const [likedRoutines, setLikedRoutines] = useState<number[]>([]);
 
   useEffect(() => {
     // Ensure we load user first, then data (so we can fetch user-specific likes)
@@ -146,60 +151,133 @@ export default function CommunitySection() {
       setPlaylists(enriched as PlaylistShared[]);
 
       // Load which playlists the current user has liked (if authenticated)
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user) {
-          // Try reading a `playlist_likes` table (playlist_id, user_id)
-          const { data: likesData, error: likesError } = await supabase
-            .from("playlist_likes")
-            .select("playlist_id, like")
-            .eq("user_id", user.id)
-            .eq("like", true);
-
-          if (!likesError && Array.isArray(likesData)) {
-            setLikedPlaylists(likesData.map((l: any) => l.playlist_id));
-          } else {
-            // If table doesn't exist or there's an error, keep local empty list
-            setLikedPlaylists([]);
-          }
-        } else {
-          setLikedPlaylists([]);
-        }
-      } catch (err) {
-        setLikedPlaylists([]);
-      }
+      await loadUserLikes("playlist");
     } else if (activeTab === "suggestions") {
       const { data } = await supabase
         .from("feature_suggested")
         .select("*, users(name)")
         .order("likes", { ascending: false });
       setSuggestions(data || []);
+      await loadUserLikes("suggestion");
     } else if (activeTab === "reports") {
       const { data } = await supabase
         .from("reports")
         .select("*, users(name)")
         .order("reported_at", { ascending: false });
       setReports(data || []);
+      await loadUserLikes("report");
     } else if (activeTab === "routines") {
       const { data } = await supabase
         .from("shared_routines")
         .select("*, users(name)")
         .order("shared_at", { ascending: false });
       setRoutines(data || []);
+      await loadUserLikes("routine");
     }
     setLoading(false);
   }
 
-  async function handleLike(type: "playlist" | "suggestion", id: number) {
-    const table = type === "playlist" ? "playlist_shared" : "feature_suggested";
-    const currentData = type === "playlist" ? playlists : suggestions;
+  async function loadUserLikes(
+    type: "playlist" | "suggestion" | "report" | "routine"
+  ) {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        if (type === "playlist") setLikedPlaylists([]);
+        if (type === "suggestion") setLikedSuggestions([]);
+        if (type === "report") setLikedReports([]);
+        if (type === "routine") setLikedRoutines([]);
+        return;
+      }
+
+      if (type === "playlist") {
+        // Playlist likes use playlist_likes table
+        const { data: likesData, error: likesError } = await supabase
+          .from("playlist_likes")
+          .select("playlist_id, like")
+          .eq("user_id", user.id)
+          .eq("like", true);
+
+        if (!likesError && Array.isArray(likesData)) {
+          setLikedPlaylists(likesData.map((l: any) => l.playlist_id));
+        } else {
+          setLikedPlaylists([]);
+        }
+      } else {
+        // Other types use the unified likes table
+        const column =
+          type === "suggestion"
+            ? "suggestion_id"
+            : type === "report"
+            ? "report_id"
+            : "routine_id";
+
+        const { data: likesData, error: likesError } = await supabase
+          .from("likes")
+          .select(`${column}, like`)
+          .eq("user_id", user.id)
+          .eq("like", true)
+          .not(column, "is", null);
+
+        if (!likesError && Array.isArray(likesData)) {
+          const ids = likesData.map((l: any) => l[column]).filter(Boolean);
+          if (type === "suggestion") setLikedSuggestions(ids);
+          if (type === "report") setLikedReports(ids);
+          if (type === "routine") setLikedRoutines(ids);
+        } else {
+          if (type === "suggestion") setLikedSuggestions([]);
+          if (type === "report") setLikedReports([]);
+          if (type === "routine") setLikedRoutines([]);
+        }
+      }
+    } catch (err) {
+      if (type === "playlist") setLikedPlaylists([]);
+      if (type === "suggestion") setLikedSuggestions([]);
+      if (type === "report") setLikedReports([]);
+      if (type === "routine") setLikedRoutines([]);
+    }
+  }
+
+  async function handleLike(
+    type: "playlist" | "suggestion" | "report" | "routine",
+    id: number
+  ) {
+    const tableMap = {
+      playlist: "playlist_shared",
+      suggestion: "feature_suggested",
+      report: "reports",
+      routine: "shared_routines",
+    };
+    const table = tableMap[type];
+
+    const currentDataMap = {
+      playlist: playlists,
+      suggestion: suggestions,
+      report: reports,
+      routine: routines,
+    };
+    const currentData = currentDataMap[type];
     const item = currentData.find((i) => i.id === id);
     if (!item) return;
 
-    // Trigger a quick animation for playlist likes (optimistic)
-    if (type === "playlist") {
+    const likedMap = {
+      playlist: likedPlaylists,
+      suggestion: likedSuggestions,
+      report: likedReports,
+      routine: likedRoutines,
+    };
+    const isLiked = likedMap[type].includes(id);
+
+    // Trigger animation (optimistic)
+    if (isLiked) {
+      setAnimatingUnlikes((s) => [...s, id]);
+      setTimeout(
+        () => setAnimatingUnlikes((s) => s.filter((x) => x !== id)),
+        300
+      );
+    } else {
       setAnimatingLikes((s) => [...s, id]);
       setTimeout(
         () => setAnimatingLikes((s) => s.filter((x) => x !== id)),
@@ -207,69 +285,93 @@ export default function CommunitySection() {
       );
     }
 
-    // Toggle behavior: if already liked by current user -> unlike (set like=false), else like
-    if (type === "playlist" && likedPlaylists.includes(id)) {
+    // Toggle behavior: if already liked -> unlike (set like=false), else like
+    if (isLiked) {
       // Unlike flow
-      // play an unlike animation
-      setAnimatingUnlikes((s) => [...s, id]);
-      setTimeout(
-        () => setAnimatingUnlikes((s) => s.filter((x) => x !== id)),
-        300
-      );
-
       let shouldDecrement = false;
       try {
         if (userId) {
-          // Try to find existing like row
-          const { data: existing, error: existingErr } = await supabase
-            .from("playlist_likes")
-            .select("id, like")
-            .eq("user_id", userId)
-            .eq("playlist_id", id)
-            .maybeSingle();
+          if (type === "playlist") {
+            // Playlist uses playlist_likes table
+            const { data: existing, error: existingErr } = await supabase
+              .from("playlist_likes")
+              .select("id, like")
+              .eq("user_id", userId)
+              .eq("playlist_id", id)
+              .maybeSingle();
 
-          if (existingErr) {
-            // Table might not exist or other error -> fallback to decrement (assume like existed)
-            shouldDecrement = true;
-          } else if (existing) {
-            // Only decrement if DB shows the like was true
-            if (existing.like) {
+            if (existingErr) {
+              shouldDecrement = true;
+            } else if (existing && existing.like) {
               const { error: updateErr } = await supabase
                 .from("playlist_likes")
                 .update({ like: false })
                 .eq("id", existing.id);
               if (!updateErr) shouldDecrement = true;
+            } else {
+              shouldDecrement = true;
             }
           } else {
-            // No row found but client thought it was liked; fallback to decrement
-            shouldDecrement = true;
+            // Other types use unified likes table
+            const column =
+              type === "suggestion"
+                ? "suggestion_id"
+                : type === "report"
+                ? "report_id"
+                : "routine_id";
+
+            const { data: existing, error: existingErr } = await supabase
+              .from("likes")
+              .select("id, like")
+              .eq("user_id", userId)
+              .eq(column, id)
+              .maybeSingle();
+
+            if (existingErr) {
+              shouldDecrement = true;
+            } else if (existing && existing.like) {
+              const { error: updateErr } = await supabase
+                .from("likes")
+                .update({ like: false })
+                .eq("id", existing.id);
+              if (!updateErr) shouldDecrement = true;
+            } else {
+              shouldDecrement = true;
+            }
           }
         } else {
-          // not authenticated: just decrement locally as fallback
           shouldDecrement = true;
         }
       } catch (e) {
-        // On any error, fallback to decrement so UX remains responsive
         shouldDecrement = true;
       }
 
       if (shouldDecrement) {
-        // Decrement playlist count (guard at zero)
+        // Decrement count (guard at zero)
         const newLikes = Math.max((item.likes || 0) - 1, 0);
-        const { error: decErr } = await supabase
-          .from(table)
-          .update({ likes: newLikes })
-          .eq("id", id);
+        await supabase.from(table).update({ likes: newLikes }).eq("id", id);
 
-        // Update local state immediately for optimistic UI
-        setLikedPlaylists((s) => s.filter((x) => x !== id));
-        setPlaylists((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, likes: newLikes } : p))
-        );
-
-        // If decrement failed server-side, we still show the optimistic change; Realtime subscription will correct if inconsistent
-        if (decErr) {
-          // Optionally handle error (e.g., show toast). We'll rely on realtime to sync.
+        // Update local state
+        if (type === "playlist") {
+          setLikedPlaylists((s) => s.filter((x) => x !== id));
+          setPlaylists((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, likes: newLikes } : p))
+          );
+        } else if (type === "suggestion") {
+          setLikedSuggestions((s) => s.filter((x) => x !== id));
+          setSuggestions((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, likes: newLikes } : p))
+          );
+        } else if (type === "report") {
+          setLikedReports((s) => s.filter((x) => x !== id));
+          setReports((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, likes: newLikes } : p))
+          );
+        } else if (type === "routine") {
+          setLikedRoutines((s) => s.filter((x) => x !== id));
+          setRoutines((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, likes: newLikes } : p))
+          );
         }
       }
 
@@ -277,14 +379,11 @@ export default function CommunitySection() {
     }
 
     // Like flow (not previously liked)
-    // Prefer inserting/updating a row into playlist_likes and then incrementing count.
-    // If playlist_likes table is not available, fallback to increment-only and
-    // add to local likedPlaylists to avoid duplicate likes in session.
     let opError: any = null;
-    if (type === "playlist") {
-      try {
-        if (userId) {
-          // Check for an existing like row for this user+playlist
+    try {
+      if (userId) {
+        if (type === "playlist") {
+          // Playlist uses playlist_likes table
           const { data: existing, error: existingErr } = await supabase
             .from("playlist_likes")
             .select("id, like")
@@ -293,10 +392,8 @@ export default function CommunitySection() {
             .maybeSingle();
 
           if (existingErr) {
-            // table might not exist or other error
             opError = existingErr;
           } else if (existing) {
-            // If a row exists but like is false, update it to true
             if (!existing.like) {
               const { error: updateErr } = await supabase
                 .from("playlist_likes")
@@ -304,9 +401,7 @@ export default function CommunitySection() {
                 .eq("id", existing.id);
               if (updateErr) opError = updateErr;
             }
-            // if already like=true, nothing to do
           } else {
-            // No existing row: insert one
             const { error: insertErr } = await supabase
               .from("playlist_likes")
               .insert({
@@ -316,31 +411,68 @@ export default function CommunitySection() {
               });
             if (insertErr) opError = insertErr;
           }
+        } else {
+          // Other types use unified likes table
+          const column =
+            type === "suggestion"
+              ? "suggestion_id"
+              : type === "report"
+              ? "report_id"
+              : "routine_id";
+
+          const { data: existing, error: existingErr } = await supabase
+            .from("likes")
+            .select("id, like")
+            .eq("user_id", userId)
+            .eq(column, id)
+            .maybeSingle();
+
+          if (existingErr) {
+            opError = existingErr;
+          } else if (existing) {
+            if (!existing.like) {
+              const { error: updateErr } = await supabase
+                .from("likes")
+                .update({ like: true, liked_at: new Date().toISOString() })
+                .eq("id", existing.id);
+              if (updateErr) opError = updateErr;
+            }
+          } else {
+            const insertData: any = {
+              user_id: userId,
+              like: true,
+            };
+            insertData[column] = id;
+
+            const { error: insertErr } = await supabase
+              .from("likes")
+              .insert(insertData);
+            if (insertErr) opError = insertErr;
+          }
         }
-      } catch (e) {
-        opError = e;
       }
+    } catch (e) {
+      opError = e;
     }
 
+    // Increment count
     const { error } = await supabase
       .from(table)
       .update({ likes: (item.likes || 0) + 1 })
       .eq("id", id);
 
-    // If DB ops succeeded, update local liked list and reload. If not, still
-    // mark locally to avoid multiple likes during this session.
-    if (
-      (opError == null && error == null) ||
-      (opError != null && error == null)
-    ) {
-      if (type === "playlist")
-        setLikedPlaylists((s) => Array.from(new Set([...s, id])));
-      loadData();
-    } else {
-      if (type === "playlist")
-        setLikedPlaylists((s) => Array.from(new Set([...s, id])));
-      loadData();
+    // Update local state
+    if (type === "playlist") {
+      setLikedPlaylists((s) => Array.from(new Set([...s, id])));
+    } else if (type === "suggestion") {
+      setLikedSuggestions((s) => Array.from(new Set([...s, id])));
+    } else if (type === "report") {
+      setLikedReports((s) => Array.from(new Set([...s, id])));
+    } else if (type === "routine") {
+      setLikedRoutines((s) => Array.from(new Set([...s, id])));
     }
+
+    loadData();
   }
 
   async function handleSubmitPlaylist() {
@@ -431,9 +563,10 @@ export default function CommunitySection() {
     }
   }
 
-  // Realtime subscriptions: listen for playlist_shared changes (counts, inserts, deletes)
-  // and for current user's playlist_likes changes so we can update UI in real time.
+  // Realtime subscriptions: listen for changes across all community tables
   useEffect(() => {
+    const channels: any[] = [];
+
     // playlist_shared channel
     const playlistChannel = supabase
       .channel("public-playlist_shared")
@@ -448,24 +581,91 @@ export default function CommunitySection() {
               return prev.filter((p) => p.id !== rec.id);
             }
             if (payload.eventType === "INSERT") {
-              // new shared playlist: add to top (metadata will be enriched on load)
               return [
                 { ...rec, playlist_title: null, playlist_image: null },
                 ...prev,
               ];
             }
-            // UPDATE
             return prev.map((p) => (p.id === rec.id ? { ...p, ...rec } : p));
           });
         }
       )
       .subscribe();
+    channels.push(playlistChannel);
 
-    // playlist_likes channel filtered by current user
-    let likesChannel: any = null;
+    // feature_suggested channel
+    const suggestionsChannel = supabase
+      .channel("public-feature_suggested")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "feature_suggested" },
+        (payload: any) => {
+          const rec = payload.new ?? payload.old;
+          if (!rec) return;
+          setSuggestions((prev) => {
+            if (payload.eventType === "DELETE") {
+              return prev.filter((s) => s.id !== rec.id);
+            }
+            if (payload.eventType === "INSERT") {
+              return [...prev, rec];
+            }
+            return prev.map((s) => (s.id === rec.id ? { ...s, ...rec } : s));
+          });
+        }
+      )
+      .subscribe();
+    channels.push(suggestionsChannel);
+
+    // reports channel
+    const reportsChannel = supabase
+      .channel("public-reports")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "reports" },
+        (payload: any) => {
+          const rec = payload.new ?? payload.old;
+          if (!rec) return;
+          setReports((prev) => {
+            if (payload.eventType === "DELETE") {
+              return prev.filter((r) => r.id !== rec.id);
+            }
+            if (payload.eventType === "INSERT") {
+              return [...prev, rec];
+            }
+            return prev.map((r) => (r.id === rec.id ? { ...r, ...rec } : r));
+          });
+        }
+      )
+      .subscribe();
+    channels.push(reportsChannel);
+
+    // shared_routines channel
+    const routinesChannel = supabase
+      .channel("public-shared_routines")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "shared_routines" },
+        (payload: any) => {
+          const rec = payload.new ?? payload.old;
+          if (!rec) return;
+          setRoutines((prev) => {
+            if (payload.eventType === "DELETE") {
+              return prev.filter((r) => r.id !== rec.id);
+            }
+            if (payload.eventType === "INSERT") {
+              return [...prev, rec];
+            }
+            return prev.map((r) => (r.id === rec.id ? { ...r, ...rec } : r));
+          });
+        }
+      )
+      .subscribe();
+    channels.push(routinesChannel);
+
+    // playlist_likes channel (filtered by current user)
     if (userId) {
-      likesChannel = supabase
-        .channel(`user-likes-${userId}`)
+      const playlistLikesChannel = supabase
+        .channel(`user-playlist-likes-${userId}`)
         .on(
           "postgres_changes",
           {
@@ -475,12 +675,10 @@ export default function CommunitySection() {
             filter: `user_id=eq.${userId}`,
           },
           (payload: any) => {
-            if (payload.eventType === "INSERT") {
-              if (payload.new?.like) {
-                setLikedPlaylists((s) =>
-                  Array.from(new Set([...s, payload.new.playlist_id]))
-                );
-              }
+            if (payload.eventType === "INSERT" && payload.new?.like) {
+              setLikedPlaylists((s) =>
+                Array.from(new Set([...s, payload.new.playlist_id]))
+              );
             } else if (payload.eventType === "UPDATE") {
               if (payload.new?.like) {
                 setLikedPlaylists((s) =>
@@ -491,22 +689,109 @@ export default function CommunitySection() {
                   s.filter((x) => x !== payload.new.playlist_id)
                 );
               }
+            } else if (
+              payload.eventType === "DELETE" &&
+              payload.old?.playlist_id
+            ) {
+              setLikedPlaylists((s) =>
+                s.filter((x) => x !== payload.old.playlist_id)
+              );
+            }
+          }
+        )
+        .subscribe();
+      channels.push(playlistLikesChannel);
+
+      // unified likes channel (for suggestions, reports, routines)
+      const likesChannel = supabase
+        .channel(`user-likes-${userId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "likes",
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload: any) => {
+            if (payload.eventType === "INSERT" && payload.new?.like) {
+              if (payload.new.suggestion_id) {
+                setLikedSuggestions((s) =>
+                  Array.from(new Set([...s, payload.new.suggestion_id]))
+                );
+              }
+              if (payload.new.report_id) {
+                setLikedReports((s) =>
+                  Array.from(new Set([...s, payload.new.report_id]))
+                );
+              }
+              if (payload.new.routine_id) {
+                setLikedRoutines((s) =>
+                  Array.from(new Set([...s, payload.new.routine_id]))
+                );
+              }
+            } else if (payload.eventType === "UPDATE") {
+              if (payload.new?.like) {
+                if (payload.new.suggestion_id) {
+                  setLikedSuggestions((s) =>
+                    Array.from(new Set([...s, payload.new.suggestion_id]))
+                  );
+                }
+                if (payload.new.report_id) {
+                  setLikedReports((s) =>
+                    Array.from(new Set([...s, payload.new.report_id]))
+                  );
+                }
+                if (payload.new.routine_id) {
+                  setLikedRoutines((s) =>
+                    Array.from(new Set([...s, payload.new.routine_id]))
+                  );
+                }
+              } else {
+                if (payload.new.suggestion_id) {
+                  setLikedSuggestions((s) =>
+                    s.filter((x) => x !== payload.new.suggestion_id)
+                  );
+                }
+                if (payload.new.report_id) {
+                  setLikedReports((s) =>
+                    s.filter((x) => x !== payload.new.report_id)
+                  );
+                }
+                if (payload.new.routine_id) {
+                  setLikedRoutines((s) =>
+                    s.filter((x) => x !== payload.new.routine_id)
+                  );
+                }
+              }
             } else if (payload.eventType === "DELETE") {
-              if (payload.old?.playlist_id) {
-                setLikedPlaylists((s) =>
-                  s.filter((x) => x !== payload.old.playlist_id)
+              if (payload.old?.suggestion_id) {
+                setLikedSuggestions((s) =>
+                  s.filter((x) => x !== payload.old.suggestion_id)
+                );
+              }
+              if (payload.old?.report_id) {
+                setLikedReports((s) =>
+                  s.filter((x) => x !== payload.old.report_id)
+                );
+              }
+              if (payload.old?.routine_id) {
+                setLikedRoutines((s) =>
+                  s.filter((x) => x !== payload.old.routine_id)
                 );
               }
             }
           }
         )
         .subscribe();
+      channels.push(likesChannel);
     }
 
     return () => {
       try {
-        if (playlistChannel) supabase.removeChannel(playlistChannel);
-        if (likesChannel) supabase.removeChannel(likesChannel);
+        channels.forEach((ch) => {
+          if (ch) supabase.removeChannel(ch);
+        });
       } catch (e) {
         // ignore cleanup errors
       }
@@ -781,10 +1066,28 @@ export default function CommunitySection() {
                           onClick={() =>
                             handleLike("suggestion", suggestion.id)
                           }
-                          className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-[#0a0a0a] hover:bg-blue-400/20 rounded-lg transition-all shrink-0"
+                          aria-label="Me gusta sugerencia"
+                          aria-pressed={likedSuggestions.includes(
+                            suggestion.id
+                          )}
+                          className={`flex items-center gap-2 px-2 sm:px-3 py-1 bg-[#0a0a0a] rounded-lg transition-all shrink-0 transform duration-200 ease-out hover:bg-blue-400/20 ${
+                            likedSuggestions.includes(suggestion.id)
+                              ? "opacity-90"
+                              : ""
+                          }`}
                         >
-                          <span className="text-xs sm:text-sm text-gray-200">
-                            Me gusta
+                          <span
+                            className={`flex items-center justify-center transform transition-transform duration-200 ${
+                              animatingLikes.includes(suggestion.id)
+                                ? "scale-110 text-blue-400"
+                                : animatingUnlikes.includes(suggestion.id)
+                                ? "scale-90 text-gray-400/80"
+                                : likedSuggestions.includes(suggestion.id)
+                                ? "scale-100 text-blue-400"
+                                : "scale-100 text-gray-300"
+                            }`}
+                          >
+                            <Heart className="w-4 h-4 sm:w-5 sm:h-5" />
                           </span>
                           <span className="text-xs sm:text-sm text-gray-400">
                             {suggestion.likes || 0}
@@ -865,17 +1168,51 @@ export default function CommunitySection() {
                         key={report.id}
                         className="bg-[#0f0f0f] rounded-lg p-3 sm:p-4 border border-gray-800/50"
                       >
-                        <div className="flex items-start gap-2 mb-2">
-                          <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded-full">
-                            {report.section}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {new Date(report.reported_at).toLocaleDateString()}
-                          </span>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-start gap-2 mb-2">
+                              <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded-full">
+                                {report.section}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                {new Date(
+                                  report.reported_at
+                                ).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <p className="text-white text-xs sm:text-sm">
+                              {report.report_text}
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() => handleLike("report", report.id)}
+                            aria-label="Me gusta reporte"
+                            aria-pressed={likedReports.includes(report.id)}
+                            className={`flex items-center gap-2 px-2 sm:px-3 py-1 bg-[#0a0a0a] rounded-lg transition-all shrink-0 transform duration-200 ease-out hover:bg-red-500/20 ${
+                              likedReports.includes(report.id)
+                                ? "opacity-90"
+                                : ""
+                            }`}
+                          >
+                            <span
+                              className={`flex items-center justify-center transform transition-transform duration-200 ${
+                                animatingLikes.includes(report.id)
+                                  ? "scale-110 text-red-400"
+                                  : animatingUnlikes.includes(report.id)
+                                  ? "scale-90 text-gray-400/80"
+                                  : likedReports.includes(report.id)
+                                  ? "scale-100 text-red-400"
+                                  : "scale-100 text-gray-300"
+                              }`}
+                            >
+                              <Heart className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </span>
+                            <span className="text-xs sm:text-sm text-gray-400">
+                              {report.likes || 0}
+                            </span>
+                          </button>
                         </div>
-                        <p className="text-white text-xs sm:text-sm">
-                          {report.report_text}
-                        </p>
                       </div>
                     ))
                 )}
@@ -960,29 +1297,61 @@ export default function CommunitySection() {
                       key={routine.id}
                       className="bg-[#0f0f0f] rounded-lg p-3 sm:p-4 border border-gray-800/50 hover:border-purple-400/50 transition-all"
                     >
-                      <div className="flex flex-wrap items-start gap-2 mb-2">
-                        <span
-                          className={`px-2 py-0.5 text-xs rounded-full ${
-                            routine.difficulty === "principiante"
-                              ? "bg-green-500/20 text-green-400"
-                              : routine.difficulty === "intermedio"
-                              ? "bg-yellow-500/20 text-yellow-400"
-                              : "bg-red-500/20 text-red-400"
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex flex-wrap items-start gap-2 mb-2">
+                            <span
+                              className={`px-2 py-0.5 text-xs rounded-full ${
+                                routine.difficulty === "principiante"
+                                  ? "bg-green-500/20 text-green-400"
+                                  : routine.difficulty === "intermedio"
+                                  ? "bg-yellow-500/20 text-yellow-400"
+                                  : "bg-red-500/20 text-red-400"
+                              }`}
+                            >
+                              {routine.difficulty}
+                            </span>
+                            <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded-full">
+                              {routine.duration}
+                            </span>
+                          </div>
+                          <p className="text-white text-xs sm:text-sm mb-2">
+                            {routine.description}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Por {routine.users?.name || "Usuario"} •{" "}
+                            {new Date(routine.shared_at).toLocaleDateString()}
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => handleLike("routine", routine.id)}
+                          aria-label="Me gusta rutina"
+                          aria-pressed={likedRoutines.includes(routine.id)}
+                          className={`flex items-center gap-2 px-2 sm:px-3 py-1 bg-[#0a0a0a] rounded-lg transition-all shrink-0 transform duration-200 ease-out hover:bg-purple-500/20 ${
+                            likedRoutines.includes(routine.id)
+                              ? "opacity-90"
+                              : ""
                           }`}
                         >
-                          {routine.difficulty}
-                        </span>
-                        <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded-full">
-                          {routine.duration}
-                        </span>
+                          <span
+                            className={`flex items-center justify-center transform transition-transform duration-200 ${
+                              animatingLikes.includes(routine.id)
+                                ? "scale-110 text-purple-400"
+                                : animatingUnlikes.includes(routine.id)
+                                ? "scale-90 text-gray-400/80"
+                                : likedRoutines.includes(routine.id)
+                                ? "scale-100 text-purple-400"
+                                : "scale-100 text-gray-300"
+                            }`}
+                          >
+                            <Heart className="w-4 h-4 sm:w-5 sm:h-5" />
+                          </span>
+                          <span className="text-xs sm:text-sm text-gray-400">
+                            {routine.likes || 0}
+                          </span>
+                        </button>
                       </div>
-                      <p className="text-white text-xs sm:text-sm mb-2">
-                        {routine.description}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Por {routine.users?.name || "Usuario"} •{" "}
-                        {new Date(routine.shared_at).toLocaleDateString()}
-                      </p>
                     </div>
                   ))
                 )}
