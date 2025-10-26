@@ -1,8 +1,10 @@
 "use client";
 
 interface NavbarProps {
-  activeSection: "home" | "insights" | "config";
-  onSectionChange: (section: "home" | "insights" | "config") => void;
+  activeSection: "home" | "insights" | "config" | "community";
+  onSectionChange: (
+    section: "home" | "insights" | "config" | "community"
+  ) => void;
   userName?: string;
 }
 
@@ -83,10 +85,34 @@ export default function Navbar({
                     <span className="hidden sm:inline">Insights</span>
                   </span>
                 </button>
-
+                <button
+                  onClick={() => onSectionChange("community")}
+                  className={`group relative px-4 py-2 rounded-full font-medium transition-all duration-300 ${
+                    activeSection === "community"
+                      ? "bg-green-500 text-white shadow-lg shadow-green-500/50"
+                      : "text-gray-400 hover:text-white hover:bg-[#1a1a1a]"
+                  }`}
+                >
+                  <span className="relative z-10 flex items-center gap-2 text-sm sm:text-base">
+                    <svg
+                      className="w-4 h-4 sm:w-5 sm:h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m0-4a4 4 0 100-8 4 4 0 000 8zm8 0a4 4 0 100-8 4 4 0 000 8z"
+                      />
+                    </svg>
+                    <span className="hidden sm:inline">Community</span>
+                  </span>
+                </button>
                 <button
                   onClick={() => onSectionChange("config")}
-                  className={`group relative px-6 py-2 rounded-full font-medium transition-all duration-300 ${
+                  className={`group relative px-5 sm:px-6 py-2 rounded-full font-medium transition-all duration-300 ${
                     activeSection === "config"
                       ? "bg-pink-400 text-white shadow-lg shadow-pink-400/50"
                       : "text-gray-400 hover:text-white hover:bg-[#1a1a1a]"
@@ -115,6 +141,8 @@ export default function Navbar({
                     <span className="hidden sm:inline">Config</span>
                   </span>
                 </button>
+
+                {/* Community button */}
               </div>
             </div>
           </div>
