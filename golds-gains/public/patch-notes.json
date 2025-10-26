@@ -1,0 +1,13 @@
+[
+  {
+    "version": "0.3.51",
+    "date": "2025-10-25",
+    "items": [
+      "Lanzamiento inicial de Community: playlists, sugerencias, reportes y rutinas.",
+      "Soporte para compartir playlists de Spotify y sistema de likes.",
+      "Sugerencias de features con votación (la más votada se destacará).",
+      "Sección de reportes para que usuarios envíen bugs y problemas.",
+      "Rutinas compartidas con dificultad y duración visibles."
+    ]
+  }
+]

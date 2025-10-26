@@ -7,8 +7,9 @@ import Navbar from "../components/navbar";
 import HomeSection from "../components/HomeSection";
 import InsightsSection from "../components/InsightsSection";
 import ConfigSection from "../components/ConfigSection";
+import CommunitySection from "../components/CommunitySection";
 
-type Section = "home" | "insights" | "config";
+type Section = "home" | "insights" | "config" | "community";
 
 interface User {
   id: string;
@@ -119,6 +120,7 @@ export default function HomePage() {
         {activeSection === "home" && <HomeSection user={user} />}
         {activeSection === "insights" && <InsightsSection />}
         {activeSection === "config" && <ConfigSection user={user} />}
+        {activeSection === "community" && <CommunitySection />}
       </main>
 
       {/* Footer */}
