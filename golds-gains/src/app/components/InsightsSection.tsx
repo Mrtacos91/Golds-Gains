@@ -96,6 +96,14 @@ export default function InsightsSection() {
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([]);
   const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
   const [selectedExercise, setSelectedExercise] = useState<string>("");
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    chartId: string;
+    index: number;
+    x: number;
+    y: number;
+    value: string;
+    date: string;
+  } | null>(null);
 
   useEffect(() => {
     loadInsightsData();
@@ -708,18 +716,16 @@ export default function InsightsSection() {
 
                   return (
                     <div key={idx} className="space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
-                        <p className="text-white font-medium text-sm sm:text-base">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-white text-sm sm:text-base truncate">
                           {prog.exercise}
-                        </p>
-                        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-                          <span className="text-gray-400 text-xs">
+                        </h4>
+                        <div className="flex items-baseline gap-2 shrink-0">
+                          <span className="text-xs text-gray-400">
                             {firstWeight.toFixed(1)} kg
                           </span>
                           <svg
-                            className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                              increase >= 0 ? "text-green-400" : "text-red-400"
-                            }`}
+                            className="w-4 h-4 text-green-400"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -728,87 +734,240 @@ export default function InsightsSection() {
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d={
-                                increase >= 0
-                                  ? "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                                  : "M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"
-                              }
+                              d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
                             />
                           </svg>
-                          <span
-                            className={`text-xs font-semibold ${
-                              increase >= 0 ? "text-green-400" : "text-red-400"
-                            }`}
-                          >
+                          <span className="text-base sm:text-lg font-bold text-green-400">
                             {lastWeight.toFixed(1)} kg
                           </span>
-                          <span
-                            className={`text-xs ${
-                              increase >= 0 ? "text-green-400" : "text-red-400"
-                            }`}
-                          >
-                            ({increasePercent > 0 ? "+" : ""}
-                            {increasePercent}%)
+                          <span className="text-xs text-green-400">
+                            (+{increasePercent}%)
                           </span>
                         </div>
                       </div>
 
-                      {/* Real-time chart */}
-                      <div className="w-full h-32 sm:h-40 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-2 sm:p-3 relative">
-                        {/* Y-axis labels */}
-                        <div className="absolute left-1 top-3 bottom-3 flex flex-col justify-between text-[10px] sm:text-xs text-gray-500">
-                          <span>
-                            {Math.max(
-                              ...prog.data.map((d) => d.avgWeight)
-                            ).toFixed(0)}
-                          </span>
-                          <span>
-                            {Math.min(
-                              ...prog.data.map((d) => d.avgWeight)
-                            ).toFixed(0)}
-                          </span>
-                        </div>
+                      {/* Gráfica de línea con puntos interactivos */}
+                      <div className="relative bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-4 h-64">
+                        <svg
+                          width="100%"
+                          height="100%"
+                          viewBox="0 0 600 200"
+                          preserveAspectRatio="xMidYMid meet"
+                          className="overflow-visible"
+                        >
+                          {/* Grid de fondo */}
+                          <defs>
+                            <linearGradient
+                              id={`gradient-${idx}`}
+                              x1="0%"
+                              y1="0%"
+                              x2="0%"
+                              y2="100%"
+                            >
+                              <stop
+                                offset="0%"
+                                stopColor="rgb(34, 197, 94)"
+                                stopOpacity="0.3"
+                              />
+                              <stop
+                                offset="100%"
+                                stopColor="rgb(34, 197, 94)"
+                                stopOpacity="0"
+                              />
+                            </linearGradient>
+                          </defs>
 
-                        {/* Chart */}
-                        <div className="ml-6 sm:ml-8 h-full flex items-end gap-0.5 sm:gap-1 overflow-x-auto scrollbar-hide">
-                          {prog.data.map((point, i) => {
-                            const maxWeight = Math.max(
-                              ...prog.data.map((d) => d.avgWeight)
-                            );
+                          {/* Líneas de grid horizontales */}
+                          {[0, 1, 2, 3, 4].map((i) => (
+                            <line
+                              key={i}
+                              x1="40"
+                              y1={30 + i * 35}
+                              x2="580"
+                              y2={30 + i * 35}
+                              stroke="rgba(255,255,255,0.05)"
+                              strokeWidth="1"
+                            />
+                          ))}
+
+                          {(() => {
+                            const data = prog.data;
                             const minWeight = Math.min(
-                              ...prog.data.map((d) => d.avgWeight)
+                              ...data.map((d) => d.avgWeight)
+                            );
+                            const maxWeight = Math.max(
+                              ...data.map((d) => d.avgWeight)
                             );
                             const range = maxWeight - minWeight || 1;
-                            const height =
-                              ((point.avgWeight - minWeight) / range) * 80 + 20;
+                            const paddingTop = 30;
+                            const paddingBottom = 30;
+                            const paddingLeft = 40;
+                            const paddingRight = 20;
+                            const chartHeight =
+                              200 - paddingTop - paddingBottom;
+                            const chartWidth = 600 - paddingLeft - paddingRight;
+
+                            // Calcular puntos
+                            const points = data.map((d, i) => {
+                              const x =
+                                paddingLeft +
+                                (i / (data.length - 1 || 1)) * chartWidth;
+                              const normalizedY =
+                                (d.avgWeight - minWeight) / range;
+                              const y =
+                                paddingTop +
+                                chartHeight -
+                                normalizedY * chartHeight;
+                              return { x, y, ...d };
+                            });
+
+                            // Crear path de línea
+                            const pathD = points
+                              .map(
+                                (p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`
+                              )
+                              .join(" ");
+
+                            // Path para área rellena
+                            const areaD = `${pathD} L ${
+                              paddingLeft + chartWidth
+                            } ${paddingTop + chartHeight} L ${paddingLeft} ${
+                              paddingTop + chartHeight
+                            } Z`;
 
                             return (
-                              <div
-                                key={i}
-                                className="flex-1 min-w-5 sm:min-w-0 flex flex-col items-center"
-                              >
-                                <div
-                                  className="w-full bg-linear-to-t from-orange-400 to-orange-500 rounded-sm transition-all duration-300 hover:opacity-80 active:opacity-70 cursor-pointer relative group"
-                                  style={{
-                                    height: `${height}%`,
-                                    minHeight: "8px",
-                                  }}
+                              <>
+                                {/* Labels del eje Y */}
+                                <text
+                                  x="35"
+                                  y={paddingTop + 5}
+                                  fill="rgba(255,255,255,0.4)"
+                                  fontSize="11"
+                                  textAnchor="end"
                                 >
-                                  {/* Tooltip */}
-                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 sm:mb-2 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-gray-900 text-white text-[10px] sm:text-xs rounded opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
-                                    {point.date}
-                                    <br />
-                                    {point.avgWeight.toFixed(1)} kg
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                                  {maxWeight.toFixed(0)}
+                                </text>
+                                <text
+                                  x="35"
+                                  y={paddingTop + chartHeight / 2 + 5}
+                                  fill="rgba(255,255,255,0.4)"
+                                  fontSize="11"
+                                  textAnchor="end"
+                                >
+                                  {((maxWeight + minWeight) / 2).toFixed(0)}
+                                </text>
+                                <text
+                                  x="35"
+                                  y={paddingTop + chartHeight + 5}
+                                  fill="rgba(255,255,255,0.4)"
+                                  fontSize="11"
+                                  textAnchor="end"
+                                >
+                                  {minWeight.toFixed(0)}
+                                </text>
 
-                        {/* X-axis label */}
-                        <div className="mt-2 text-center text-xs text-gray-500">
-                          {prog.data.length} entrenamientos registrados
+                                {/* Área rellena con gradiente */}
+                                <path
+                                  d={areaD}
+                                  fill={`url(#gradient-${idx})`}
+                                />
+
+                                {/* Línea principal */}
+                                <path
+                                  d={pathD}
+                                  fill="none"
+                                  stroke="rgb(34, 197, 94)"
+                                  strokeWidth="3"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]"
+                                />
+
+                                {/* Puntos interactivos */}
+                                {points.map((point, i) => (
+                                  <g key={i}>
+                                    {/* Área clickeable más grande (invisible) */}
+                                    <circle
+                                      cx={point.x}
+                                      cy={point.y}
+                                      r="15"
+                                      fill="transparent"
+                                      className="cursor-pointer"
+                                      onMouseEnter={(e) => {
+                                        const rect = e.currentTarget
+                                          .closest("svg")!
+                                          .getBoundingClientRect();
+                                        const svgX = point.x / 600;
+                                        const svgY = point.y / 200;
+                                        setHoveredPoint({
+                                          chartId: `load-${idx}`,
+                                          index: i,
+                                          x: rect.left + svgX * rect.width,
+                                          y: rect.top + svgY * rect.height,
+                                          value: `${point.avgWeight.toFixed(
+                                            1
+                                          )} kg`,
+                                          date: new Date(
+                                            point.date
+                                          ).toLocaleDateString("es-ES", {
+                                            day: "numeric",
+                                            month: "short",
+                                          }),
+                                        });
+                                      }}
+                                      onMouseLeave={() => setHoveredPoint(null)}
+                                    />
+                                    {/* Punto visible */}
+                                    <circle
+                                      cx={point.x}
+                                      cy={point.y}
+                                      r="5"
+                                      fill="#0f0f0f"
+                                      stroke="rgb(34, 197, 94)"
+                                      strokeWidth="3"
+                                      className="pointer-events-none transition-all duration-200"
+                                      style={{
+                                        filter:
+                                          hoveredPoint?.chartId ===
+                                            `load-${idx}` &&
+                                          hoveredPoint?.index === i
+                                            ? "drop-shadow(0 0 8px rgba(34,197,94,0.8))"
+                                            : "none",
+                                        transform:
+                                          hoveredPoint?.chartId ===
+                                            `load-${idx}` &&
+                                          hoveredPoint?.index === i
+                                            ? "scale(1.4)"
+                                            : "scale(1)",
+                                        transformOrigin: `${point.x}px ${point.y}px`,
+                                      }}
+                                    />
+                                  </g>
+                                ))}
+                              </>
+                            );
+                          })()}
+                        </svg>
+
+                        {/* Labels de eje X (fechas) */}
+                        <div className="absolute bottom-1 left-12 right-4 flex justify-between text-[10px] text-gray-500">
+                          <span>
+                            {new Date(prog.data[0].date).toLocaleDateString(
+                              "es-ES",
+                              { day: "numeric", month: "short" }
+                            )}
+                          </span>
+                          <span className="text-gray-600">
+                            {prog.data.length} entrenamientos
+                          </span>
+                          <span>
+                            {new Date(
+                              prog.data[prog.data.length - 1].date
+                            ).toLocaleDateString("es-ES", {
+                              day: "numeric",
+                              month: "short",
+                            })}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -880,26 +1039,187 @@ export default function InsightsSection() {
         </h3>
         {completionHistory.length > 0 ? (
           <div className="space-y-3">
-            <div className="flex items-end gap-1 h-40 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-3">
-              {completionHistory.map((day, idx) => (
-                <div
-                  key={idx}
-                  className="flex-1 flex flex-col items-center gap-1"
-                >
-                  <div
-                    className="w-full bg-linear-to-t from-pink-400 to-pink-500 rounded-sm transition-all duration-300 hover:opacity-80"
-                    style={{ height: `${day.percentage}%`, minHeight: "4px" }}
-                    title={`${day.date}: ${day.percentage}% completado`}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>{completionHistory[0]?.date || ""}</span>
-              <span>Porcentaje de ejercicios completados por día</span>
-              <span>
-                {completionHistory[completionHistory.length - 1]?.date || ""}
-              </span>
+            {/* Gráfica de línea para historial de completación */}
+            <div className="relative bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-4 h-64">
+              <svg
+                width="100%"
+                height="100%"
+                viewBox="0 0 700 200"
+                preserveAspectRatio="xMidYMid meet"
+                className="overflow-visible"
+              >
+                <defs>
+                  <linearGradient
+                    id="completion-gradient"
+                    x1="0%"
+                    y1="0%"
+                    x2="0%"
+                    y2="100%"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor="rgb(236, 72, 153)"
+                      stopOpacity="0.3"
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="rgb(236, 72, 153)"
+                      stopOpacity="0"
+                    />
+                  </linearGradient>
+                </defs>
+
+                {/* Grid horizontal */}
+                {[0, 25, 50, 75, 100].map((percent, i) => {
+                  const y = 30 + (100 - percent) * 1.4;
+                  return (
+                    <g key={i}>
+                      <line
+                        x1="50"
+                        y1={y}
+                        x2="680"
+                        y2={y}
+                        stroke="rgba(255,255,255,0.05)"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x="45"
+                        y={y + 4}
+                        fill="rgba(255,255,255,0.4)"
+                        fontSize="11"
+                        textAnchor="end"
+                      >
+                        {percent}%
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {(() => {
+                  const data = completionHistory;
+                  const paddingTop = 30;
+                  const paddingBottom = 30;
+                  const paddingLeft = 50;
+                  const paddingRight = 20;
+                  const chartHeight = 200 - paddingTop - paddingBottom;
+                  const chartWidth = 700 - paddingLeft - paddingRight;
+
+                  // Calcular puntos
+                  const points = data.map((d, i) => {
+                    const x =
+                      paddingLeft + (i / (data.length - 1 || 1)) * chartWidth;
+                    const y =
+                      paddingTop +
+                      chartHeight -
+                      (d.percentage / 100) * chartHeight;
+                    return { x, y, ...d };
+                  });
+
+                  const pathD = points
+                    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+                    .join(" ");
+
+                  const areaD = `${pathD} L ${paddingLeft + chartWidth} ${
+                    paddingTop + chartHeight
+                  } L ${paddingLeft} ${paddingTop + chartHeight} Z`;
+
+                  return (
+                    <>
+                      {/* Área rellena */}
+                      <path d={areaD} fill="url(#completion-gradient)" />
+
+                      {/* Línea principal */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke="rgb(236, 72, 153)"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]"
+                      />
+
+                      {/* Puntos interactivos */}
+                      {points.map((point, i) => (
+                        <g key={i}>
+                          <circle
+                            cx={point.x}
+                            cy={point.y}
+                            r="12"
+                            fill="transparent"
+                            className="cursor-pointer"
+                            onMouseEnter={(e) => {
+                              const rect = e.currentTarget
+                                .closest("svg")!
+                                .getBoundingClientRect();
+                              const svgX = point.x / 700;
+                              const svgY = point.y / 200;
+                              setHoveredPoint({
+                                chartId: "completion",
+                                index: i,
+                                x: rect.left + svgX * rect.width,
+                                y: rect.top + svgY * rect.height,
+                                value: `${point.percentage}%`,
+                                date: new Date(point.date).toLocaleDateString(
+                                  "es-ES",
+                                  {
+                                    day: "numeric",
+                                    month: "short",
+                                  }
+                                ),
+                              });
+                            }}
+                            onMouseLeave={() => setHoveredPoint(null)}
+                          />
+                          <circle
+                            cx={point.x}
+                            cy={point.y}
+                            r="4"
+                            fill="#0f0f0f"
+                            stroke="rgb(236, 72, 153)"
+                            strokeWidth="2.5"
+                            className="pointer-events-none transition-all duration-200"
+                            style={{
+                              filter:
+                                hoveredPoint?.chartId === "completion" &&
+                                hoveredPoint?.index === i
+                                  ? "drop-shadow(0 0 8px rgba(236,72,153,0.8))"
+                                  : "none",
+                              transform:
+                                hoveredPoint?.chartId === "completion" &&
+                                hoveredPoint?.index === i
+                                  ? "scale(1.5)"
+                                  : "scale(1)",
+                              transformOrigin: `${point.x}px ${point.y}px`,
+                            }}
+                          />
+                        </g>
+                      ))}
+                    </>
+                  );
+                })()}
+              </svg>
+
+              <div className="absolute bottom-1 left-14 right-4 flex justify-between text-[10px] text-gray-500">
+                <span>
+                  {new Date(completionHistory[0].date).toLocaleDateString(
+                    "es-ES",
+                    {
+                      day: "numeric",
+                      month: "short",
+                    }
+                  )}
+                </span>
+                <span className="text-gray-600">Últimos 30 días</span>
+                <span>
+                  {new Date(
+                    completionHistory[completionHistory.length - 1].date
+                  ).toLocaleDateString("es-ES", {
+                    day: "numeric",
+                    month: "short",
+                  })}
+                </span>
+              </div>
             </div>
           </div>
         ) : (
@@ -1052,6 +1372,29 @@ export default function InsightsSection() {
             )}
         </div>
       </div>
+
+      {/* Tooltip flotante para puntos hover */}
+      {hoveredPoint && (
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: `${hoveredPoint.x}px`,
+            top: `${hoveredPoint.y - 60}px`,
+            transform: "translateX(-50%)",
+          }}
+        >
+          <div className="bg-linear-to-br from-gray-900 to-black border border-gray-700 rounded-lg px-3 py-2 shadow-2xl shadow-black/50">
+            <div className="text-white font-bold text-sm">
+              {hoveredPoint.value}
+            </div>
+            <div className="text-gray-400 text-xs">{hoveredPoint.date}</div>
+            {/* Flecha */}
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-0 translate-y-full">
+              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-gray-700"></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
