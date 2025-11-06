@@ -59,6 +59,14 @@ export default function GoalsPage() {
   const [fatTrendThisMonth, setFatTrendThisMonth] = useState<WeightRecord[]>(
     []
   );
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    chartId: string;
+    index: number;
+    x: number;
+    y: number;
+    value: string;
+    date: string;
+  } | null>(null);
 
   useEffect(() => {
     loadGoalsData();
@@ -790,44 +798,202 @@ export default function GoalsPage() {
             </h3>
             {weightTrend6Months.length > 0 ? (
               <div className="space-y-3">
-                <div className="flex items-end gap-1 h-48 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-3">
-                  {weightTrend6Months.map((record, idx) => {
-                    const maxWeight = Math.max(
-                      ...weightTrend6Months.map((r) => r.weight)
-                    );
-                    const minWeight = Math.min(
-                      ...weightTrend6Months.map((r) => r.weight)
-                    );
-                    const range = maxWeight - minWeight || 1;
-                    const height = ((record.weight - minWeight) / range) * 100;
-
-                    return (
-                      <div
-                        key={idx}
-                        className="flex-1 flex flex-col items-center gap-1"
+                <div className="relative bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-4 h-64">
+                  <svg
+                    width="100%"
+                    height="100%"
+                    viewBox="0 0 700 200"
+                    preserveAspectRatio="xMidYMid meet"
+                    className="overflow-visible"
+                  >
+                    <defs>
+                      <linearGradient
+                        id="weight-6m-gradient"
+                        x1="0%"
+                        y1="0%"
+                        x2="0%"
+                        y2="100%"
                       >
-                        <div
-                          className="w-full bg-linear-to-t from-blue-400 to-blue-500 rounded-sm transition-all duration-300 hover:opacity-80"
-                          style={{ height: `${height}%`, minHeight: "8px" }}
-                          title={`${record.date}: ${record.weight.toFixed(
-                            1
-                          )} ${units}`}
+                        <stop
+                          offset="0%"
+                          stopColor="rgb(96, 165, 250)"
+                          stopOpacity="0.3"
                         />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>
-                    {weightTrend6Months[0]?.weight.toFixed(1)} {units}
-                  </span>
-                  <span>Peso por semana</span>
-                  <span>
-                    {weightTrend6Months[
-                      weightTrend6Months.length - 1
-                    ]?.weight.toFixed(1)}{" "}
-                    {units}
-                  </span>
+                        <stop
+                          offset="100%"
+                          stopColor="rgb(96, 165, 250)"
+                          stopOpacity="0"
+                        />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Grid horizontal */}
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <line
+                        key={i}
+                        x1="50"
+                        y1={30 + i * 35}
+                        x2="680"
+                        y2={30 + i * 35}
+                        stroke="rgba(255,255,255,0.05)"
+                        strokeWidth="1"
+                      />
+                    ))}
+
+                    {(() => {
+                      const data = weightTrend6Months;
+                      const minWeight = Math.min(...data.map((r) => r.weight));
+                      const maxWeight = Math.max(...data.map((r) => r.weight));
+                      const range = maxWeight - minWeight || 1;
+                      const paddingTop = 30;
+                      const paddingBottom = 30;
+                      const paddingLeft = 50;
+                      const paddingRight = 20;
+                      const chartHeight = 200 - paddingTop - paddingBottom;
+                      const chartWidth = 700 - paddingLeft - paddingRight;
+
+                      const points = data.map((d, i) => {
+                        const x =
+                          paddingLeft +
+                          (i / (data.length - 1 || 1)) * chartWidth;
+                        const normalizedY = (d.weight - minWeight) / range;
+                        const y =
+                          paddingTop + chartHeight - normalizedY * chartHeight;
+                        return { x, y, ...d };
+                      });
+
+                      const pathD = points
+                        .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+                        .join(" ");
+
+                      const areaD = `${pathD} L ${paddingLeft + chartWidth} ${
+                        paddingTop + chartHeight
+                      } L ${paddingLeft} ${paddingTop + chartHeight} Z`;
+
+                      return (
+                        <>
+                          {/* Labels del eje Y */}
+                          <text
+                            x="45"
+                            y={paddingTop + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {maxWeight.toFixed(0)}
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight / 2 + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {((maxWeight + minWeight) / 2).toFixed(0)}
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {minWeight.toFixed(0)}
+                          </text>
+
+                          {/* Área rellena */}
+                          <path d={areaD} fill="url(#weight-6m-gradient)" />
+
+                          {/* Línea principal */}
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke="rgb(96, 165, 250)"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]"
+                          />
+
+                          {/* Puntos interactivos */}
+                          {points.map((point, i) => (
+                            <g key={i}>
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="12"
+                                fill="transparent"
+                                className="cursor-pointer"
+                                onMouseEnter={(e) => {
+                                  const rect = e.currentTarget
+                                    .closest("svg")!
+                                    .getBoundingClientRect();
+                                  const svgX = point.x / 700;
+                                  const svgY = point.y / 200;
+                                  setHoveredPoint({
+                                    chartId: "weight-6m",
+                                    index: i,
+                                    x: rect.left + svgX * rect.width,
+                                    y: rect.top + svgY * rect.height,
+                                    value: `${point.weight.toFixed(
+                                      1
+                                    )} ${units}`,
+                                    date: new Date(
+                                      point.date
+                                    ).toLocaleDateString("es-ES", {
+                                      day: "numeric",
+                                      month: "short",
+                                    }),
+                                  });
+                                }}
+                                onMouseLeave={() => setHoveredPoint(null)}
+                              />
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="4"
+                                fill="#0f0f0f"
+                                stroke="rgb(96, 165, 250)"
+                                strokeWidth="2.5"
+                                className="pointer-events-none transition-all duration-200"
+                                style={{
+                                  filter:
+                                    hoveredPoint?.chartId === "weight-6m" &&
+                                    hoveredPoint?.index === i
+                                      ? "drop-shadow(0 0 8px rgba(96,165,250,0.8))"
+                                      : "none",
+                                  transform:
+                                    hoveredPoint?.chartId === "weight-6m" &&
+                                    hoveredPoint?.index === i
+                                      ? "scale(1.5)"
+                                      : "scale(1)",
+                                  transformOrigin: `${point.x}px ${point.y}px`,
+                                }}
+                              />
+                            </g>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </svg>
+
+                  <div className="absolute bottom-1 left-14 right-4 flex justify-between text-[10px] text-gray-500">
+                    <span>
+                      {new Date(weightTrend6Months[0].date).toLocaleDateString(
+                        "es-ES",
+                        { day: "numeric", month: "short" }
+                      )}
+                    </span>
+                    <span className="text-gray-600">Peso por semana</span>
+                    <span>
+                      {new Date(
+                        weightTrend6Months[weightTrend6Months.length - 1].date
+                      ).toLocaleDateString("es-ES", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -844,41 +1010,182 @@ export default function GoalsPage() {
             </h3>
             {weightTrendThisMonth.length > 0 ? (
               <div className="space-y-3">
-                <div className="flex items-end justify-around gap-3 h-48 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-3">
-                  {weightTrendThisMonth.map((record, idx) => {
-                    const maxWeight = Math.max(
-                      ...weightTrendThisMonth.map((r) => r.weight)
-                    );
-                    const minWeight = Math.min(
-                      ...weightTrendThisMonth.map((r) => r.weight)
-                    );
-                    const range = maxWeight - minWeight || 1;
-                    const height = ((record.weight - minWeight) / range) * 100;
-
-                    return (
-                      <div
-                        key={idx}
-                        className="flex flex-col items-center gap-2"
+                <div className="relative bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-4 h-64">
+                  <svg
+                    width="100%"
+                    height="100%"
+                    viewBox="0 0 500 200"
+                    preserveAspectRatio="xMidYMid meet"
+                    className="overflow-visible"
+                  >
+                    <defs>
+                      <linearGradient
+                        id="weight-month-gradient"
+                        x1="0%"
+                        y1="0%"
+                        x2="0%"
+                        y2="100%"
                       >
-                        <div
-                          className="w-16 bg-linear-to-t from-blue-400 to-blue-500 rounded transition-all duration-300 hover:opacity-80"
-                          style={{
-                            height: `${Math.max(height, 20)}%`,
-                            minHeight: "20px",
-                          }}
-                          title={`Semana ${idx + 1}: ${record.weight.toFixed(
-                            1
-                          )} ${units}`}
+                        <stop
+                          offset="0%"
+                          stopColor="rgb(96, 165, 250)"
+                          stopOpacity="0.3"
                         />
-                        <span className="text-xs text-gray-400">
-                          S{idx + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="text-center text-xs text-gray-500">
-                  <span>Peso por semana del mes actual</span>
+                        <stop
+                          offset="100%"
+                          stopColor="rgb(96, 165, 250)"
+                          stopOpacity="0"
+                        />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Grid */}
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <line
+                        key={i}
+                        x1="50"
+                        y1={30 + i * 35}
+                        x2="480"
+                        y2={30 + i * 35}
+                        stroke="rgba(255,255,255,0.05)"
+                        strokeWidth="1"
+                      />
+                    ))}
+
+                    {(() => {
+                      const data = weightTrendThisMonth;
+                      const minWeight = Math.min(...data.map((r) => r.weight));
+                      const maxWeight = Math.max(...data.map((r) => r.weight));
+                      const range = maxWeight - minWeight || 1;
+                      const paddingTop = 30;
+                      const paddingBottom = 30;
+                      const paddingLeft = 50;
+                      const paddingRight = 20;
+                      const chartHeight = 200 - paddingTop - paddingBottom;
+                      const chartWidth = 500 - paddingLeft - paddingRight;
+
+                      const points = data.map((d, i) => {
+                        const x =
+                          paddingLeft +
+                          (i / (data.length - 1 || 1)) * chartWidth;
+                        const normalizedY = (d.weight - minWeight) / range;
+                        const y =
+                          paddingTop + chartHeight - normalizedY * chartHeight;
+                        return { x, y, ...d };
+                      });
+
+                      const pathD = points
+                        .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+                        .join(" ");
+
+                      const areaD = `${pathD} L ${paddingLeft + chartWidth} ${
+                        paddingTop + chartHeight
+                      } L ${paddingLeft} ${paddingTop + chartHeight} Z`;
+
+                      return (
+                        <>
+                          {/* Labels Y */}
+                          <text
+                            x="45"
+                            y={paddingTop + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {maxWeight.toFixed(0)}
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight / 2 + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {((maxWeight + minWeight) / 2).toFixed(0)}
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {minWeight.toFixed(0)}
+                          </text>
+
+                          <path d={areaD} fill="url(#weight-month-gradient)" />
+
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke="rgb(96, 165, 250)"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]"
+                          />
+
+                          {points.map((point, i) => (
+                            <g key={i}>
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="12"
+                                fill="transparent"
+                                className="cursor-pointer"
+                                onMouseEnter={(e) => {
+                                  const rect = e.currentTarget
+                                    .closest("svg")!
+                                    .getBoundingClientRect();
+                                  const svgX = point.x / 500;
+                                  const svgY = point.y / 200;
+                                  setHoveredPoint({
+                                    chartId: "weight-month",
+                                    index: i,
+                                    x: rect.left + svgX * rect.width,
+                                    y: rect.top + svgY * rect.height,
+                                    value: `${point.weight.toFixed(
+                                      1
+                                    )} ${units}`,
+                                    date: `Semana ${i + 1}`,
+                                  });
+                                }}
+                                onMouseLeave={() => setHoveredPoint(null)}
+                              />
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="4"
+                                fill="#0f0f0f"
+                                stroke="rgb(96, 165, 250)"
+                                strokeWidth="2.5"
+                                className="pointer-events-none transition-all duration-200"
+                                style={{
+                                  filter:
+                                    hoveredPoint?.chartId === "weight-month" &&
+                                    hoveredPoint?.index === i
+                                      ? "drop-shadow(0 0 8px rgba(96,165,250,0.8))"
+                                      : "none",
+                                  transform:
+                                    hoveredPoint?.chartId === "weight-month" &&
+                                    hoveredPoint?.index === i
+                                      ? "scale(1.5)"
+                                      : "scale(1)",
+                                  transformOrigin: `${point.x}px ${point.y}px`,
+                                }}
+                              />
+                            </g>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </svg>
+
+                  <div className="absolute bottom-1 left-14 right-4 flex justify-between text-[10px] text-gray-500">
+                    <span>Semana 1</span>
+                    <span className="text-gray-600">Mes actual</span>
+                    <span>Semana {weightTrendThisMonth.length}</span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -898,42 +1205,197 @@ export default function GoalsPage() {
             </h3>
             {fatTrend6Months.length > 0 ? (
               <div className="space-y-3">
-                <div className="flex items-end gap-1 h-48 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-3">
-                  {fatTrend6Months.map((record, idx) => {
-                    const maxFat = Math.max(
-                      ...fatTrend6Months.map((r) => r.fatPercent)
-                    );
-                    const minFat = Math.min(
-                      ...fatTrend6Months.map((r) => r.fatPercent)
-                    );
-                    const range = maxFat - minFat || 1;
-                    const height = ((record.fatPercent - minFat) / range) * 100;
-
-                    return (
-                      <div
-                        key={idx}
-                        className="flex-1 flex flex-col items-center gap-1"
+                <div className="relative bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-4 h-64">
+                  <svg
+                    width="100%"
+                    height="100%"
+                    viewBox="0 0 700 200"
+                    preserveAspectRatio="xMidYMid meet"
+                    className="overflow-visible"
+                  >
+                    <defs>
+                      <linearGradient
+                        id="fat-6m-gradient"
+                        x1="0%"
+                        y1="0%"
+                        x2="0%"
+                        y2="100%"
                       >
-                        <div
-                          className="w-full bg-linear-to-t from-pink-400 to-pink-500 rounded-sm transition-all duration-300 hover:opacity-80"
-                          style={{ height: `${height}%`, minHeight: "8px" }}
-                          title={`${record.date}: ${record.fatPercent.toFixed(
-                            1
-                          )}%`}
+                        <stop
+                          offset="0%"
+                          stopColor="rgb(244, 114, 182)"
+                          stopOpacity="0.3"
                         />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>{fatTrend6Months[0]?.fatPercent.toFixed(1)}%</span>
-                  <span>Grasa corporal por semana</span>
-                  <span>
-                    {fatTrend6Months[
-                      fatTrend6Months.length - 1
-                    ]?.fatPercent.toFixed(1)}
-                    %
-                  </span>
+                        <stop
+                          offset="100%"
+                          stopColor="rgb(244, 114, 182)"
+                          stopOpacity="0"
+                        />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Grid */}
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <line
+                        key={i}
+                        x1="50"
+                        y1={30 + i * 35}
+                        x2="680"
+                        y2={30 + i * 35}
+                        stroke="rgba(255,255,255,0.05)"
+                        strokeWidth="1"
+                      />
+                    ))}
+
+                    {(() => {
+                      const data = fatTrend6Months;
+                      const minFat = Math.min(...data.map((r) => r.fatPercent));
+                      const maxFat = Math.max(...data.map((r) => r.fatPercent));
+                      const range = maxFat - minFat || 1;
+                      const paddingTop = 30;
+                      const paddingBottom = 30;
+                      const paddingLeft = 50;
+                      const paddingRight = 20;
+                      const chartHeight = 200 - paddingTop - paddingBottom;
+                      const chartWidth = 700 - paddingLeft - paddingRight;
+
+                      const points = data.map((d, i) => {
+                        const x =
+                          paddingLeft +
+                          (i / (data.length - 1 || 1)) * chartWidth;
+                        const normalizedY = (d.fatPercent - minFat) / range;
+                        const y =
+                          paddingTop + chartHeight - normalizedY * chartHeight;
+                        return { x, y, ...d };
+                      });
+
+                      const pathD = points
+                        .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+                        .join(" ");
+
+                      const areaD = `${pathD} L ${paddingLeft + chartWidth} ${
+                        paddingTop + chartHeight
+                      } L ${paddingLeft} ${paddingTop + chartHeight} Z`;
+
+                      return (
+                        <>
+                          {/* Labels Y */}
+                          <text
+                            x="45"
+                            y={paddingTop + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {maxFat.toFixed(0)}%
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight / 2 + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {((maxFat + minFat) / 2).toFixed(0)}%
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {minFat.toFixed(0)}%
+                          </text>
+
+                          <path d={areaD} fill="url(#fat-6m-gradient)" />
+
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke="rgb(244, 114, 182)"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="drop-shadow-[0_0_8px_rgba(244,114,182,0.5)]"
+                          />
+
+                          {points.map((point, i) => (
+                            <g key={i}>
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="12"
+                                fill="transparent"
+                                className="cursor-pointer"
+                                onMouseEnter={(e) => {
+                                  const rect = e.currentTarget
+                                    .closest("svg")!
+                                    .getBoundingClientRect();
+                                  const svgX = point.x / 700;
+                                  const svgY = point.y / 200;
+                                  setHoveredPoint({
+                                    chartId: "fat-6m",
+                                    index: i,
+                                    x: rect.left + svgX * rect.width,
+                                    y: rect.top + svgY * rect.height,
+                                    value: `${point.fatPercent.toFixed(1)}%`,
+                                    date: new Date(
+                                      point.date
+                                    ).toLocaleDateString("es-ES", {
+                                      day: "numeric",
+                                      month: "short",
+                                    }),
+                                  });
+                                }}
+                                onMouseLeave={() => setHoveredPoint(null)}
+                              />
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="4"
+                                fill="#0f0f0f"
+                                stroke="rgb(244, 114, 182)"
+                                strokeWidth="2.5"
+                                className="pointer-events-none transition-all duration-200"
+                                style={{
+                                  filter:
+                                    hoveredPoint?.chartId === "fat-6m" &&
+                                    hoveredPoint?.index === i
+                                      ? "drop-shadow(0 0 8px rgba(244,114,182,0.8))"
+                                      : "none",
+                                  transform:
+                                    hoveredPoint?.chartId === "fat-6m" &&
+                                    hoveredPoint?.index === i
+                                      ? "scale(1.5)"
+                                      : "scale(1)",
+                                  transformOrigin: `${point.x}px ${point.y}px`,
+                                }}
+                              />
+                            </g>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </svg>
+
+                  <div className="absolute bottom-1 left-14 right-4 flex justify-between text-[10px] text-gray-500">
+                    <span>
+                      {new Date(fatTrend6Months[0].date).toLocaleDateString(
+                        "es-ES",
+                        { day: "numeric", month: "short" }
+                      )}
+                    </span>
+                    <span className="text-gray-600">% grasa por semana</span>
+                    <span>
+                      {new Date(
+                        fatTrend6Months[fatTrend6Months.length - 1].date
+                      ).toLocaleDateString("es-ES", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -950,41 +1412,180 @@ export default function GoalsPage() {
             </h3>
             {fatTrendThisMonth.length > 0 ? (
               <div className="space-y-3">
-                <div className="flex items-end justify-around gap-3 h-48 bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-3">
-                  {fatTrendThisMonth.map((record, idx) => {
-                    const maxFat = Math.max(
-                      ...fatTrendThisMonth.map((r) => r.fatPercent)
-                    );
-                    const minFat = Math.min(
-                      ...fatTrendThisMonth.map((r) => r.fatPercent)
-                    );
-                    const range = maxFat - minFat || 1;
-                    const height = ((record.fatPercent - minFat) / range) * 100;
-
-                    return (
-                      <div
-                        key={idx}
-                        className="flex flex-col items-center gap-2"
+                <div className="relative bg-[#0f0f0f] rounded-lg border border-gray-800/50 p-4 h-64">
+                  <svg
+                    width="100%"
+                    height="100%"
+                    viewBox="0 0 500 200"
+                    preserveAspectRatio="xMidYMid meet"
+                    className="overflow-visible"
+                  >
+                    <defs>
+                      <linearGradient
+                        id="fat-month-gradient"
+                        x1="0%"
+                        y1="0%"
+                        x2="0%"
+                        y2="100%"
                       >
-                        <div
-                          className="w-16 bg-linear-to-t from-pink-400 to-pink-500 rounded transition-all duration-300 hover:opacity-80"
-                          style={{
-                            height: `${Math.max(height, 20)}%`,
-                            minHeight: "20px",
-                          }}
-                          title={`Semana ${
-                            idx + 1
-                          }: ${record.fatPercent.toFixed(1)}%`}
+                        <stop
+                          offset="0%"
+                          stopColor="rgb(244, 114, 182)"
+                          stopOpacity="0.3"
                         />
-                        <span className="text-xs text-gray-400">
-                          S{idx + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="text-center text-xs text-gray-500">
-                  <span>Grasa corporal por semana del mes actual</span>
+                        <stop
+                          offset="100%"
+                          stopColor="rgb(244, 114, 182)"
+                          stopOpacity="0"
+                        />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Grid */}
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <line
+                        key={i}
+                        x1="50"
+                        y1={30 + i * 35}
+                        x2="480"
+                        y2={30 + i * 35}
+                        stroke="rgba(255,255,255,0.05)"
+                        strokeWidth="1"
+                      />
+                    ))}
+
+                    {(() => {
+                      const data = fatTrendThisMonth;
+                      const minFat = Math.min(...data.map((r) => r.fatPercent));
+                      const maxFat = Math.max(...data.map((r) => r.fatPercent));
+                      const range = maxFat - minFat || 1;
+                      const paddingTop = 30;
+                      const paddingBottom = 30;
+                      const paddingLeft = 50;
+                      const paddingRight = 20;
+                      const chartHeight = 200 - paddingTop - paddingBottom;
+                      const chartWidth = 500 - paddingLeft - paddingRight;
+
+                      const points = data.map((d, i) => {
+                        const x =
+                          paddingLeft +
+                          (i / (data.length - 1 || 1)) * chartWidth;
+                        const normalizedY = (d.fatPercent - minFat) / range;
+                        const y =
+                          paddingTop + chartHeight - normalizedY * chartHeight;
+                        return { x, y, ...d };
+                      });
+
+                      const pathD = points
+                        .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+                        .join(" ");
+
+                      const areaD = `${pathD} L ${paddingLeft + chartWidth} ${
+                        paddingTop + chartHeight
+                      } L ${paddingLeft} ${paddingTop + chartHeight} Z`;
+
+                      return (
+                        <>
+                          {/* Labels Y */}
+                          <text
+                            x="45"
+                            y={paddingTop + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {maxFat.toFixed(0)}%
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight / 2 + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {((maxFat + minFat) / 2).toFixed(0)}%
+                          </text>
+                          <text
+                            x="45"
+                            y={paddingTop + chartHeight + 5}
+                            fill="rgba(255,255,255,0.4)"
+                            fontSize="11"
+                            textAnchor="end"
+                          >
+                            {minFat.toFixed(0)}%
+                          </text>
+
+                          <path d={areaD} fill="url(#fat-month-gradient)" />
+
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke="rgb(244, 114, 182)"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="drop-shadow-[0_0_8px_rgba(244,114,182,0.5)]"
+                          />
+
+                          {points.map((point, i) => (
+                            <g key={i}>
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="12"
+                                fill="transparent"
+                                className="cursor-pointer"
+                                onMouseEnter={(e) => {
+                                  const rect = e.currentTarget
+                                    .closest("svg")!
+                                    .getBoundingClientRect();
+                                  const svgX = point.x / 500;
+                                  const svgY = point.y / 200;
+                                  setHoveredPoint({
+                                    chartId: "fat-month",
+                                    index: i,
+                                    x: rect.left + svgX * rect.width,
+                                    y: rect.top + svgY * rect.height,
+                                    value: `${point.fatPercent.toFixed(1)}%`,
+                                    date: `Semana ${i + 1}`,
+                                  });
+                                }}
+                                onMouseLeave={() => setHoveredPoint(null)}
+                              />
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="4"
+                                fill="#0f0f0f"
+                                stroke="rgb(244, 114, 182)"
+                                strokeWidth="2.5"
+                                className="pointer-events-none transition-all duration-200"
+                                style={{
+                                  filter:
+                                    hoveredPoint?.chartId === "fat-month" &&
+                                    hoveredPoint?.index === i
+                                      ? "drop-shadow(0 0 8px rgba(244,114,182,0.8))"
+                                      : "none",
+                                  transform:
+                                    hoveredPoint?.chartId === "fat-month" &&
+                                    hoveredPoint?.index === i
+                                      ? "scale(1.5)"
+                                      : "scale(1)",
+                                  transformOrigin: `${point.x}px ${point.y}px`,
+                                }}
+                              />
+                            </g>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </svg>
+
+                  <div className="absolute bottom-1 left-14 right-4 flex justify-between text-[10px] text-gray-500">
+                    <span>Semana 1</span>
+                    <span className="text-gray-600">Mes actual</span>
+                    <span>Semana {fatTrendThisMonth.length}</span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1053,6 +1654,29 @@ export default function GoalsPage() {
           </div>
         )}
       </div>
+
+      {/* Tooltip flotante para puntos hover */}
+      {hoveredPoint && (
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: `${hoveredPoint.x}px`,
+            top: `${hoveredPoint.y - 60}px`,
+            transform: "translateX(-50%)",
+          }}
+        >
+          <div className="bg-linear-to-br from-gray-900 to-black border border-gray-700 rounded-lg px-3 py-2 shadow-2xl shadow-black/50">
+            <div className="text-white font-bold text-sm">
+              {hoveredPoint.value}
+            </div>
+            <div className="text-gray-400 text-xs">{hoveredPoint.date}</div>
+            {/* Flecha */}
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-0 translate-y-full">
+              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent border-t-gray-700"></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
