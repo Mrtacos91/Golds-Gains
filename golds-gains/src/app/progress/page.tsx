@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import { exerciseService } from "@/services/exerciseService";
 
 interface Plan {
   id: number;
@@ -82,6 +83,18 @@ export default function ProgressPage() {
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [existingWorkout, setExistingWorkout] = useState<Workout | null>(null);
   const [isToday, setIsToday] = useState(true);
+
+  // Replace exercise states
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [replaceExerciseIndex, setReplaceExerciseIndex] = useState<
+    number | null
+  >(null);
+  const [replaceMode, setReplaceMode] = useState<"custom" | "saved" | null>(
+    null
+  );
+  const [customExerciseName, setCustomExerciseName] = useState("");
+  const [savedExercises, setSavedExercises] = useState<any[]>([]);
+  const [loadingSavedExercises, setLoadingSavedExercises] = useState(false);
 
   useEffect(() => {
     loadPlan();
@@ -427,6 +440,107 @@ export default function ProgressPage() {
     }
 
     setExercises(newExercises);
+  };
+
+  const handleOpenReplaceModal = async (exerciseIndex: number) => {
+    setReplaceExerciseIndex(exerciseIndex);
+    setShowReplaceModal(true);
+    setReplaceMode(null);
+    setCustomExerciseName("");
+
+    // Cargar ejercicios guardados
+    setLoadingSavedExercises(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const exercises = await exerciseService.getUserExercises(user.id);
+        setSavedExercises(exercises);
+      }
+    } catch (error) {
+      console.error("Error loading saved exercises:", error);
+    } finally {
+      setLoadingSavedExercises(false);
+    }
+  };
+
+  const handleReplaceWithCustom = () => {
+    if (!customExerciseName.trim() || replaceExerciseIndex === null) return;
+
+    const newExercises = [...exercises];
+    const exercise = newExercises[replaceExerciseIndex];
+
+    // Guardar referencia al ejercicio original en las notas
+    const originalName = exercise.name;
+
+    // Reemplazar nombre
+    exercise.name = customExerciseName.trim();
+
+    // Marcar que fue reemplazado (esto se podría usar para mostrar en la UI)
+    exercise.status = "pendiente"; // Reset status
+
+    setExercises(newExercises);
+    setShowReplaceModal(false);
+    setReplaceExerciseIndex(null);
+    setCustomExerciseName("");
+    setReplaceMode(null);
+
+    console.log(
+      `[handleReplaceWithCustom] Ejercicio "${originalName}" reemplazado por "${customExerciseName}"`
+    );
+  };
+
+  const handleReplaceWithSaved = (savedExercise: any) => {
+    if (replaceExerciseIndex === null) return;
+
+    const newExercises = [...exercises];
+    const exercise = newExercises[replaceExerciseIndex];
+
+    // Guardar referencia al ejercicio original
+    const originalName = exercise.name;
+
+    // Reemplazar con ejercicio guardado
+    exercise.name = savedExercise.name;
+    exercise.plannedReps = savedExercise.default_reps;
+
+    // Ajustar series si el ejercicio guardado tiene diferente cantidad
+    const currentSeriesCount = exercise.seriesData.length;
+    const targetSeriesCount = savedExercise.default_series;
+
+    if (targetSeriesCount > currentSeriesCount) {
+      // Agregar series faltantes
+      for (let i = currentSeriesCount; i < targetSeriesCount; i++) {
+        exercise.seriesData.push({
+          reps: 0,
+          weight: "",
+          rir: 0,
+          completedAt: null,
+        });
+      }
+    } else if (targetSeriesCount < currentSeriesCount) {
+      // Remover series sobrantes
+      exercise.seriesData = exercise.seriesData.slice(0, targetSeriesCount);
+    }
+
+    exercise.plannedSeries = targetSeriesCount;
+    exercise.status = "pendiente"; // Reset status
+
+    setExercises(newExercises);
+    setShowReplaceModal(false);
+    setReplaceExerciseIndex(null);
+    setReplaceMode(null);
+
+    console.log(
+      `[handleReplaceWithSaved] Ejercicio "${originalName}" reemplazado por "${savedExercise.name}"`
+    );
+  };
+
+  const handleCancelReplace = () => {
+    setShowReplaceModal(false);
+    setReplaceExerciseIndex(null);
+    setReplaceMode(null);
+    setCustomExerciseName("");
   };
 
   const handleSubmit = async () => {
@@ -1234,6 +1348,286 @@ export default function ProgressPage() {
           )}
         </div>
       </div>
+
+      {/* Replace Exercise Modal */}
+      {showReplaceModal && replaceExerciseIndex !== null && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl border border-gray-800/50 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-[#0a0a0a]/95 backdrop-blur-sm border-b border-gray-800/50 p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-400/10 flex items-center justify-center">
+                    <svg
+                      className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-bold text-white">
+                      Reemplazar Ejercicio
+                    </h3>
+                    <p className="text-xs sm:text-sm text-gray-400">
+                      Ejercicio actual: {exercises[replaceExerciseIndex].name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleCancelReplace}
+                  className="p-2 rounded-lg bg-gray-800/50 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 sm:p-6">
+              {!replaceMode ? (
+                /* Mode Selection */
+                <div className="space-y-3 sm:space-y-4">
+                  <p className="text-gray-400 text-sm sm:text-base mb-4">
+                    Selecciona cómo deseas reemplazar el ejercicio:
+                  </p>
+
+                  <button
+                    onClick={() => setReplaceMode("custom")}
+                    className="w-full p-4 sm:p-6 bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 hover:border-blue-400/50 rounded-xl text-left transition-all group"
+                  >
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-400/10 flex items-center justify-center shrink-0 group-hover:bg-blue-400/20 transition-colors">
+                        <svg
+                          className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-base sm:text-lg font-bold text-white mb-1 group-hover:text-blue-400 transition-colors">
+                          Ejercicio Personalizado
+                        </h4>
+                        <p className="text-xs sm:text-sm text-gray-400">
+                          Escribe el nombre de un ejercicio diferente
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setReplaceMode("saved")}
+                    className="w-full p-4 sm:p-6 bg-linear-to-br from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 hover:border-purple-400/50 rounded-xl text-left transition-all group"
+                  >
+                    <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-purple-400/10 flex items-center justify-center shrink-0 group-hover:bg-purple-400/20 transition-colors">
+                        <svg
+                          className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                          />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-base sm:text-lg font-bold text-white mb-1 group-hover:text-purple-400 transition-colors">
+                          Mis Ejercicios Guardados
+                        </h4>
+                        <p className="text-xs sm:text-sm text-gray-400">
+                          Selecciona de tu biblioteca de ejercicios
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              ) : replaceMode === "custom" ? (
+                /* Custom Exercise Form */
+                <div className="space-y-4">
+                  <button
+                    onClick={() => setReplaceMode(null)}
+                    className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                    Volver
+                  </button>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Nombre del ejercicio
+                    </label>
+                    <input
+                      type="text"
+                      value={customExerciseName}
+                      onChange={(e) => setCustomExerciseName(e.target.value)}
+                      placeholder="Ej: Peck Deck, Leg Extension, etc."
+                      className="w-full px-4 py-3 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent text-sm sm:text-base"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      onClick={handleCancelReplace}
+                      className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors text-sm sm:text-base"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleReplaceWithCustom}
+                      disabled={!customExerciseName.trim()}
+                      className="flex-1 px-4 py-3 bg-blue-400 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-lg transition-colors text-sm sm:text-base"
+                    >
+                      Reemplazar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Saved Exercises List */
+                <div className="space-y-4">
+                  <button
+                    onClick={() => setReplaceMode(null)}
+                    className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                    Volver
+                  </button>
+
+                  {loadingSavedExercises ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-400 mx-auto"></div>
+                      <p className="text-gray-500 text-sm mt-3">
+                        Cargando ejercicios...
+                      </p>
+                    </div>
+                  ) : savedExercises.length === 0 ? (
+                    <div className="text-center py-8">
+                      <div className="w-16 h-16 rounded-full bg-gray-800/50 flex items-center justify-center mx-auto mb-3">
+                        <svg
+                          className="w-8 h-8 text-gray-600"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+                          />
+                        </svg>
+                      </div>
+                      <p className="text-gray-400 text-sm">
+                        No tienes ejercicios guardados
+                      </p>
+                      <p className="text-gray-600 text-xs mt-1">
+                        Ve a "Mis Ejercicios" para agregar algunos
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {savedExercises.map((exercise) => (
+                        <button
+                          key={exercise.id}
+                          onClick={() => handleReplaceWithSaved(exercise)}
+                          className="w-full p-3 sm:p-4 bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] hover:from-[#151515] hover:to-[#202020] border border-gray-800/50 hover:border-purple-400/50 rounded-lg text-left transition-all group"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="text-white font-semibold text-sm sm:text-base truncate group-hover:text-purple-400 transition-colors">
+                                  {exercise.name}
+                                </h4>
+                                <span className="px-2 py-0.5 bg-purple-400/20 border border-purple-400/30 rounded-full text-purple-400 text-xs capitalize shrink-0">
+                                  {exercise.muscle_group}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-gray-400">
+                                <span>{exercise.default_series} series</span>
+                                <span>×</span>
+                                <span>{exercise.default_reps} reps</span>
+                              </div>
+                            </div>
+                            <svg
+                              className="w-5 h-5 text-gray-600 group-hover:text-purple-400 transition-colors shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 5l7 7-7 7"
+                              />
+                            </svg>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

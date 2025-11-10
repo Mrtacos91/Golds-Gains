@@ -3,6 +3,10 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import {
+  exerciseService,
+  Exercise as CustomExercise,
+} from "@/services/exerciseService";
 
 interface Plan {
   id: number;
@@ -189,8 +193,50 @@ export default function PlanPage() {
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [step, setStep] = useState(1); // 1: Split, 2: Asignar días, 3: Ejercicios por día
 
+  // My Exercises states
+  const [showMyExercises, setShowMyExercises] = useState(false);
+  const [myExercises, setMyExercises] = useState<CustomExercise[]>([]);
+  const [loadingExercises, setLoadingExercises] = useState(false);
+  const [showExerciseForm, setShowExerciseForm] = useState(false);
+  const [exerciseFormData, setExerciseFormData] = useState<
+    Partial<CustomExercise>
+  >({
+    name: "",
+    muscle_group: "pecho",
+    default_series: 3,
+    default_reps: 10,
+    notes: "",
+  });
+  const [editingExerciseId, setEditingExerciseId] = useState<number | null>(
+    null
+  );
+  const [filterMuscleGroup, setFilterMuscleGroup] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const loadMyExercises = async () => {
+    try {
+      setLoadingExercises(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const exercises = await exerciseService.getUserExercises(user.id, {
+        muscle_group: filterMuscleGroup || undefined,
+        search: searchTerm || undefined,
+      });
+
+      setMyExercises(exercises);
+    } catch (error) {
+      console.error("Error loading exercises:", error);
+    } finally {
+      setLoadingExercises(false);
+    }
+  };
+
   useEffect(() => {
     checkExistingPlan();
+    loadMyExercises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -221,6 +267,108 @@ export default function PlanPage() {
       setLoading(false);
     }
   };
+
+  const handleSaveExercise = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      if (!exerciseFormData.name || !exerciseFormData.muscle_group) {
+        alert("Por favor completa el nombre y grupo muscular");
+        return;
+      }
+
+      if (editingExerciseId) {
+        // Actualizar
+        await exerciseService.updateExercise(
+          editingExerciseId,
+          exerciseFormData
+        );
+        alert("Ejercicio actualizado exitosamente");
+      } else {
+        // Crear
+        await exerciseService.createExercise({
+          ...exerciseFormData,
+          user_id: user.id,
+        } as CustomExercise);
+        alert("Ejercicio creado exitosamente");
+      }
+
+      setShowExerciseForm(false);
+      setEditingExerciseId(null);
+      setExerciseFormData({
+        name: "",
+        muscle_group: "pecho",
+        default_series: 3,
+        default_reps: 10,
+        notes: "",
+      });
+      await loadMyExercises();
+    } catch (error) {
+      console.error("Error saving exercise:", error);
+      alert("Error al guardar el ejercicio");
+    }
+  };
+
+  const handleEditExercise = (exercise: CustomExercise) => {
+    setEditingExerciseId(exercise.id || null);
+    setExerciseFormData({
+      name: exercise.name,
+      muscle_group: exercise.muscle_group,
+      default_series: exercise.default_series,
+      default_reps: exercise.default_reps,
+      notes: exercise.notes || "",
+    });
+    setShowExerciseForm(true);
+  };
+
+  const handleDeleteExercise = async (id: number) => {
+    if (!confirm("¿Estás seguro de eliminar este ejercicio?")) return;
+
+    try {
+      await exerciseService.deleteExercise(id);
+      alert("Ejercicio eliminado exitosamente");
+      await loadMyExercises();
+    } catch (error) {
+      console.error("Error deleting exercise:", error);
+      alert("Error al eliminar el ejercicio");
+    }
+  };
+
+  const handleImportFromPlan = async () => {
+    if (!existingPlan) return;
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const imported = await exerciseService.importExercisesFromPlan(
+        user.id,
+        existingPlan.exercises
+      );
+
+      if (imported > 0) {
+        alert(`${imported} ejercicio(s) importado(s) exitosamente`);
+        await loadMyExercises();
+      } else {
+        alert("Todos los ejercicios del plan ya están guardados");
+      }
+    } catch (error) {
+      console.error("Error importing exercises:", error);
+      alert("Error al importar ejercicios");
+    }
+  };
+
+  useEffect(() => {
+    if (showMyExercises) {
+      loadMyExercises();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterMuscleGroup, searchTerm]);
 
   const generateExercisesForMuscles = (muscles: string[]): Exercise[] => {
     const exercises: Exercise[] = [];
@@ -532,8 +680,14 @@ export default function PlanPage() {
             </svg>
             <span className="hidden sm:inline">Volver</span>
           </button>
-          {existingPlan && !showForm && (
+          {existingPlan && !showForm && !showMyExercises && (
             <div className="flex gap-2">
+              <button
+                onClick={() => setShowMyExercises(true)}
+                className="px-3 sm:px-4 py-2 bg-purple-400 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm sm:text-base"
+              >
+                Mis Ejercicios
+              </button>
               <button
                 onClick={handleEditPlan}
                 className="px-3 sm:px-4 py-2 bg-blue-400 hover:bg-blue-500 text-white rounded-lg transition-colors text-sm sm:text-base"
@@ -548,10 +702,314 @@ export default function PlanPage() {
               </button>
             </div>
           )}
+          {showMyExercises && (
+            <button
+              onClick={() => {
+                setShowMyExercises(false);
+                setShowExerciseForm(false);
+              }}
+              className="px-3 sm:px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm sm:text-base"
+            >
+              Volver al Plan
+            </button>
+          )}
         </div>
 
-        {/* Existing Plan View */}
-        {existingPlan && !showForm ? (
+        {/* My Exercises Section */}
+        {showMyExercises ? (
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-4 sm:p-8 border border-gray-800/50 shadow-xl">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-purple-400/10 flex items-center justify-center">
+                    <svg
+                      className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold text-white">
+                      Mis Ejercicios
+                    </h2>
+                    <p className="text-gray-500 text-xs sm:text-sm">
+                      {myExercises.length} ejercicio(s) guardado(s)
+                    </p>
+                  </div>
+                </div>
+                {existingPlan && (
+                  <button
+                    onClick={handleImportFromPlan}
+                    className="px-3 sm:px-4 py-2 bg-green-400 hover:bg-green-500 text-white rounded-lg transition-colors text-sm sm:text-base"
+                  >
+                    Importar del Plan
+                  </button>
+                )}
+              </div>
+
+              {/* Filters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <input
+                  type="text"
+                  placeholder="Buscar ejercicio..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="px-4 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base"
+                />
+                <select
+                  value={filterMuscleGroup}
+                  onChange={(e) => setFilterMuscleGroup(e.target.value)}
+                  className="px-4 py-2 bg-[#0f0f0f] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base"
+                >
+                  <option value="">Todos los grupos</option>
+                  <option value="pecho">Pecho</option>
+                  <option value="espalda">Espalda</option>
+                  <option value="piernas">Piernas</option>
+                  <option value="hombros">Hombros</option>
+                  <option value="biceps">Bíceps</option>
+                  <option value="triceps">Tríceps</option>
+                  <option value="abdomen">Abdomen</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </div>
+
+              {/* Exercise Form */}
+              {showExerciseForm ? (
+                <div className="bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-xl p-4 sm:p-6 border border-purple-400/30 mb-4">
+                  <h3 className="text-lg font-semibold text-white mb-4">
+                    {editingExerciseId ? "Editar Ejercicio" : "Nuevo Ejercicio"}
+                  </h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Nombre del Ejercicio
+                      </label>
+                      <input
+                        type="text"
+                        value={exerciseFormData.name}
+                        onChange={(e) =>
+                          setExerciseFormData({
+                            ...exerciseFormData,
+                            name: e.target.value,
+                          })
+                        }
+                        className="w-full px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base"
+                        placeholder="Ej: Press banca plano"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Grupo Muscular
+                        </label>
+                        <select
+                          value={exerciseFormData.muscle_group}
+                          onChange={(e) =>
+                            setExerciseFormData({
+                              ...exerciseFormData,
+                              muscle_group: e.target.value,
+                            })
+                          }
+                          className="w-full px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base"
+                        >
+                          <option value="pecho">Pecho</option>
+                          <option value="espalda">Espalda</option>
+                          <option value="piernas">Piernas</option>
+                          <option value="hombros">Hombros</option>
+                          <option value="biceps">Bíceps</option>
+                          <option value="triceps">Tríceps</option>
+                          <option value="abdomen">Abdomen</option>
+                          <option value="otro">Otro</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Series
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={exerciseFormData.default_series}
+                          onChange={(e) =>
+                            setExerciseFormData({
+                              ...exerciseFormData,
+                              default_series: parseInt(e.target.value) || 1,
+                            })
+                          }
+                          className="w-full px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Repeticiones
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={exerciseFormData.default_reps}
+                          onChange={(e) =>
+                            setExerciseFormData({
+                              ...exerciseFormData,
+                              default_reps: parseInt(e.target.value) || 1,
+                            })
+                          }
+                          className="w-full px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Notas (opcional)
+                      </label>
+                      <textarea
+                        value={exerciseFormData.notes}
+                        onChange={(e) =>
+                          setExerciseFormData({
+                            ...exerciseFormData,
+                            notes: e.target.value,
+                          })
+                        }
+                        rows={2}
+                        className="w-full px-4 py-2 bg-[#0a0a0a] border border-gray-800/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm sm:text-base resize-none"
+                        placeholder="Técnica, consejos, etc."
+                      />
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        onClick={handleSaveExercise}
+                        className="flex-1 px-4 py-2 bg-purple-400 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm sm:text-base"
+                      >
+                        {editingExerciseId
+                          ? "Guardar Cambios"
+                          : "Crear Ejercicio"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowExerciseForm(false);
+                          setEditingExerciseId(null);
+                          setExerciseFormData({
+                            name: "",
+                            muscle_group: "pecho",
+                            default_series: 3,
+                            default_reps: 10,
+                            notes: "",
+                          });
+                        }}
+                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm sm:text-base"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowExerciseForm(true)}
+                  className="w-full mb-4 px-4 py-3 bg-purple-400/10 border border-purple-400/30 rounded-lg text-purple-400 hover:bg-purple-400/20 transition-colors text-sm sm:text-base"
+                >
+                  + Agregar Nuevo Ejercicio
+                </button>
+              )}
+
+              {/* Exercises List */}
+              {loadingExercises ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-400 mx-auto"></div>
+                </div>
+              ) : myExercises.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">No hay ejercicios guardados</p>
+                  <p className="text-gray-600 text-sm mt-2">
+                    Agrega ejercicios manualmente o importa desde tu plan
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {myExercises.map((exercise) => (
+                    <div
+                      key={exercise.id}
+                      className="bg-linear-to-r from-[#0f0f0f] to-[#1a1a1a] rounded-lg p-3 sm:p-4 border border-gray-800/50 hover:border-purple-400/30 transition-all"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="text-white font-semibold text-sm sm:text-base truncate">
+                              {exercise.name}
+                            </h4>
+                            <span className="px-2 py-0.5 bg-purple-400/20 border border-purple-400/30 rounded-full text-purple-400 text-xs capitalize shrink-0">
+                              {exercise.muscle_group}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs sm:text-sm">
+                            <span className="text-pink-400">
+                              {exercise.default_series} series
+                            </span>
+                            <span className="text-gray-600">×</span>
+                            <span className="text-blue-400">
+                              {exercise.default_reps} reps
+                            </span>
+                          </div>
+                          {exercise.notes && (
+                            <p className="text-gray-500 text-xs mt-1 line-clamp-1">
+                              {exercise.notes}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleEditExercise(exercise)}
+                            className="p-2 bg-blue-400/10 border border-blue-400/20 rounded-lg text-blue-400 hover:bg-blue-400/20 transition-colors"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteExercise(exercise.id!)}
+                            className="p-2 bg-red-400/10 border border-red-400/20 rounded-lg text-red-400 hover:bg-red-400/20 transition-colors"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : /* Existing Plan View */
+        existingPlan && !showForm ? (
           <div className="space-y-4 sm:space-y-6">
             <div className="bg-linear-to-br from-[#0a0a0a] via-[#1a1a1a] to-gray-900 rounded-xl p-4 sm:p-8 border border-gray-800/50 shadow-xl">
               <div className="flex items-center gap-3 mb-4 sm:mb-6">

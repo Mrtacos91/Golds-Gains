@@ -1,10 +1,12 @@
 [
   {
-    "version": "1.0.0",
-    "date": "2025-10-25",
+    "version": "1.2.0",
+    "date": "2025-11-09",
     "items": [
-      "Primera version estable lanzada.",
-      "Se implementaron todas las funcionalidades principales."
+      "Mejoras visuales y proporciones en las gráficas de Insights: se corrigieron viewBox, padding y posicionamiento de tooltips para evitar líneas estiradas.",
+      "Nueva sección 'Mis Ejercicios' en la biblioteca: permite guardar y gestionar ejercicios personalizados.",
+      "Funcionalidad de reemplazo de ejercicios en Progreso: modal para reemplazar por ejercicio personalizado o desde la biblioteca guardada; ajustes automáticos de series/reps.",
+      "Correcciones menores y mejoras de UX en las páginas /plan y /progress (formularios, filtros y estados de carga)."
     ]
   }
 ]
