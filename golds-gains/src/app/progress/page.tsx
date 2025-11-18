@@ -49,6 +49,84 @@ interface Workout {
   created_at: string;
 }
 
+interface WorkoutRecordPayload {
+  user_id: string;
+  split: string;
+  exercises: string[];
+  series: number[];
+  reps: number[];
+  days: string[];
+  status: string[];
+  weight: string[];
+  rir: number[];
+  completed_at: (string | null)[];
+  its_done: boolean;
+  created_at: string;
+  id?: number;
+}
+
+type OfflineActionType = "create" | "update";
+
+interface OfflineWorkoutEntry {
+  id: string;
+  type: OfflineActionType;
+  payload: WorkoutRecordPayload;
+  savedAt: string;
+  meta: {
+    day: string;
+    date: string;
+    time: string;
+  };
+}
+
+const OFFLINE_WORKOUT_KEY = "gg-offline-workouts";
+
+const canUseStorage = () =>
+  typeof window !== "undefined" && !!window.localStorage;
+
+const readOfflineQueue = (): OfflineWorkoutEntry[] => {
+  if (!canUseStorage()) return [];
+  try {
+    const raw = window.localStorage.getItem(OFFLINE_WORKOUT_KEY);
+    return raw ? (JSON.parse(raw) as OfflineWorkoutEntry[]) : [];
+  } catch (error) {
+    console.error("[offlineQueue] Error leyendo storage", error);
+    return [];
+  }
+};
+
+const writeOfflineQueue = (queue: OfflineWorkoutEntry[]) => {
+  if (!canUseStorage()) return;
+  try {
+    window.localStorage.setItem(OFFLINE_WORKOUT_KEY, JSON.stringify(queue));
+  } catch (error) {
+    console.error("[offlineQueue] Error guardando storage", error);
+  }
+};
+
+const enqueueOfflineWorkout = (
+  entry: Omit<OfflineWorkoutEntry, "id" | "savedAt">
+): OfflineWorkoutEntry[] => {
+  const queue = readOfflineQueue();
+  const newEntry: OfflineWorkoutEntry = {
+    ...entry,
+    id:
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    savedAt: new Date().toISOString(),
+  };
+  queue.push(newEntry);
+  writeOfflineQueue(queue);
+  return queue;
+};
+
+const removeOfflineWorkout = (entryId: string): OfflineWorkoutEntry[] => {
+  const queue = readOfflineQueue().filter((item) => item.id !== entryId);
+  writeOfflineQueue(queue);
+  return queue;
+};
+
 const DAYS_OF_WEEK = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 
 export default function ProgressPage() {
@@ -83,6 +161,12 @@ export default function ProgressPage() {
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [existingWorkout, setExistingWorkout] = useState<Workout | null>(null);
   const [isToday, setIsToday] = useState(true);
+  const [isOffline, setIsOffline] = useState<boolean>(
+    typeof window !== "undefined" ? !navigator.onLine : false
+  );
+  const [offlineQueue, setOfflineQueue] = useState<OfflineWorkoutEntry[]>([]);
+  const [syncingOffline, setSyncingOffline] = useState(false);
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
 
   // Replace exercise states
   const [showReplaceModal, setShowReplaceModal] = useState(false);
@@ -95,6 +179,44 @@ export default function ProgressPage() {
   const [customExerciseName, setCustomExerciseName] = useState("");
   const [savedExercises, setSavedExercises] = useState<any[]>([]);
   const [loadingSavedExercises, setLoadingSavedExercises] = useState(false);
+  const refreshOfflineQueue = () => {
+    const queue = readOfflineQueue();
+    setOfflineQueue(queue);
+    return queue;
+  };
+
+  const showOfflineToast = (message: string) => {
+    setOfflineNotice(message);
+    setTimeout(() => setOfflineNotice(null), 4000);
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsOffline(!navigator.onLine);
+    refreshOfflineQueue();
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      showOfflineToast("Conexión restaurada. Sincronizando registros...");
+      syncOfflineWorkouts();
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      showOfflineToast(
+        "Modo offline activo. Guardaremos tus registros localmente."
+      );
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     loadPlan();
@@ -356,6 +478,109 @@ export default function ProgressPage() {
     }
   };
 
+  const syncOfflineWorkouts = async () => {
+    if (typeof window === "undefined" || !navigator.onLine) return;
+
+    const currentQueue = readOfflineQueue();
+    if (currentQueue.length === 0) return;
+
+    setSyncingOffline(true);
+    let remainingQueue = currentQueue;
+
+    for (const entry of currentQueue) {
+      try {
+        if (entry.type === "update" && entry.payload.id) {
+          const { error: updateError } = await supabase
+            .from("workout")
+            .update({
+              exercises: entry.payload.exercises,
+              series: entry.payload.series,
+              reps: entry.payload.reps,
+              days: entry.payload.days,
+              status: entry.payload.status,
+              weight: entry.payload.weight,
+              rir: entry.payload.rir,
+              completed_at: entry.payload.completed_at,
+              its_done: entry.payload.its_done,
+            })
+            .eq("id", entry.payload.id);
+
+          if (updateError) throw updateError;
+        } else {
+          const { error: insertError } = await supabase.from("workout").insert({
+            user_id: entry.payload.user_id,
+            split: entry.payload.split,
+            exercises: entry.payload.exercises,
+            series: entry.payload.series,
+            reps: entry.payload.reps,
+            days: entry.payload.days,
+            status: entry.payload.status,
+            weight: entry.payload.weight,
+            rir: entry.payload.rir,
+            completed_at: entry.payload.completed_at,
+            its_done: entry.payload.its_done,
+            created_at: entry.payload.created_at,
+          });
+
+          if (insertError) throw insertError;
+        }
+
+        remainingQueue = removeOfflineWorkout(entry.id);
+        setOfflineQueue(remainingQueue);
+      } catch (error) {
+        console.error(
+          "[syncOfflineWorkouts] Error sincronizando registro:",
+          error
+        );
+        showOfflineToast(
+          "No se pudo sincronizar uno de tus registros offline. Reintentaremos automáticamente."
+        );
+        break;
+      }
+    }
+
+    setSyncingOffline(false);
+
+    if (remainingQueue.length === 0) {
+      showOfflineToast(
+        "Todos tus registros offline se sincronizaron correctamente."
+      );
+      await loadExercisesForDay();
+    }
+  };
+
+  const persistWorkoutOffline = (
+    payload: WorkoutRecordPayload,
+    type: OfflineActionType
+  ) => {
+    const queue = enqueueOfflineWorkout({
+      type,
+      payload,
+      meta: {
+        day: selectedDay,
+        date: selectedDate,
+        time: selectedTime,
+      },
+    });
+    setOfflineQueue(queue);
+    showOfflineToast(
+      "Registro guardado offline. Se sincronizará automáticamente cuando vuelvas a conectarte."
+    );
+  };
+
+  const shouldQueueOfflineForError = (error: any) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return true;
+    }
+
+    const rawMessage = (error?.message || "").toString().toLowerCase();
+    return (
+      rawMessage.includes("fetch") ||
+      rawMessage.includes("network") ||
+      rawMessage.includes("timeout")
+    );
+  };
+
   const handleSeriesDataChange = (
     exerciseIndex: number,
     seriesIndex: number,
@@ -578,6 +803,8 @@ export default function ProgressPage() {
     }
 
     setSaving(true);
+    let lastPayload: WorkoutRecordPayload | null = null;
+    let lastAction: OfflineActionType = existingWorkout ? "update" : "create";
     try {
       const {
         data: { user },
@@ -637,7 +864,7 @@ export default function ProgressPage() {
       });
 
       // Preparar datos del workout
-      const workoutData = {
+      const workoutData: WorkoutRecordPayload = {
         user_id: user.id,
         split: plan.split,
         exercises: exerciseNames,
@@ -650,9 +877,24 @@ export default function ProgressPage() {
         completed_at: completedAtArray,
         its_done: allDone,
         created_at: workoutDateTimeISO,
-        isUpdate: !!existingWorkout,
         id: existingWorkout?.id,
       };
+
+      const actionType: OfflineActionType = existingWorkout
+        ? "update"
+        : "create";
+
+      lastPayload = workoutData;
+      lastAction = actionType;
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        console.warn("[handleSubmit] Guardando registro en modo offline");
+        persistWorkoutOffline(workoutData, actionType);
+        setSaving(false);
+        setShowSuccessMessage(true);
+        setTimeout(() => setShowSuccessMessage(false), 2000);
+        return;
+      }
 
       // Guardar directamente en Supabase
       let error;
@@ -666,14 +908,15 @@ export default function ProgressPage() {
         const result = await supabase
           .from("workout")
           .update({
-            exercises: exerciseNames,
-            series: seriesNumbers,
-            reps: repsArray,
-            status: statusArray,
-            weight: weightArray,
-            rir: rirArray,
-            completed_at: completedAtArray,
-            its_done: allDone,
+            exercises: workoutData.exercises,
+            series: workoutData.series,
+            reps: workoutData.reps,
+            days: workoutData.days,
+            status: workoutData.status,
+            weight: workoutData.weight,
+            rir: workoutData.rir,
+            completed_at: workoutData.completed_at,
+            its_done: workoutData.its_done,
           })
           .eq("id", existingWorkout.id)
           .select();
@@ -686,22 +929,10 @@ export default function ProgressPage() {
       } else {
         // Crear nuevo registro
         console.log("[handleSubmit] Creando nuevo workout");
+        const { id: _omitId, ...insertPayload } = workoutData;
         const result = await supabase
           .from("workout")
-          .insert({
-            user_id: user.id,
-            split: plan.split,
-            exercises: exerciseNames,
-            series: seriesNumbers,
-            reps: repsArray,
-            days: daysArray,
-            status: statusArray,
-            weight: weightArray,
-            rir: rirArray,
-            completed_at: completedAtArray,
-            its_done: allDone,
-            created_at: workoutDateTimeISO,
-          })
+          .insert(insertPayload)
           .select();
 
         error = result.error;
@@ -717,7 +948,19 @@ export default function ProgressPage() {
 
       if (error) {
         console.error("[handleSubmit] ❌ Error al guardar workout:", error);
-        alert("Error al guardar el registro: " + error.message);
+
+        if (shouldQueueOfflineForError(error)) {
+          console.warn(
+            "[handleSubmit] Guardando registro en cola offline por error de red"
+          );
+          persistWorkoutOffline(workoutData, actionType);
+          setSaving(false);
+          setShowSuccessMessage(true);
+          setTimeout(() => setShowSuccessMessage(false), 2000);
+          return;
+        } else {
+          alert("Error al guardar el registro: " + error.message);
+        }
       } else {
         console.log(
           `[handleSubmit] ✅ Registro guardado exitosamente. its_done=${allDone}`
@@ -736,7 +979,13 @@ export default function ProgressPage() {
       }
     } catch (error) {
       console.error("[handleSubmit] ❌ Error inesperado:", error);
-      alert("Error al guardar el registro");
+      if (shouldQueueOfflineForError(error) && lastPayload) {
+        persistWorkoutOffline(lastPayload, lastAction);
+        setShowSuccessMessage(true);
+        setTimeout(() => setShowSuccessMessage(false), 2000);
+      } else {
+        alert("Error al guardar el registro");
+      }
     } finally {
       setSaving(false);
     }
@@ -819,6 +1068,30 @@ export default function ProgressPage() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-3 sm:p-4 lg:p-6">
+      {/* Offline Status Indicator - Solo visible cuando está offline */}
+      {isOffline && (
+        <div className="fixed top-4 left-4 sm:top-6 sm:left-6 z-50 animate-fadeIn">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-linear-to-r from-red-500/20 to-orange-500/20 border border-red-500/50 backdrop-blur-md shadow-lg shadow-red-500/20">
+            <div className="relative">
+              <div className="w-3 h-3 rounded-full bg-red-400 animate-pulse" />
+              <div className="absolute inset-0 w-3 h-3 rounded-full bg-red-400 animate-ping opacity-75" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-red-300">
+                Modo Offline
+              </span>
+              {offlineQueue.length > 0 && (
+                <span className="text-[10px] text-red-400/80">
+                  {offlineQueue.length} registro
+                  {offlineQueue.length === 1 ? "" : "s"} pendiente
+                  {offlineQueue.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Success Message */}
       {showSuccessMessage && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50 animate-slideIn w-[calc(100%-2rem)] sm:w-auto">
@@ -847,6 +1120,54 @@ export default function ProgressPage() {
       )}
 
       <div className="max-w-4xl mx-auto">
+        {isOffline && (
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-linear-to-r from-orange-500/10 to-red-500/10 border border-orange-500/40 rounded-lg flex items-center gap-3 animate-fadeIn">
+            <svg
+              className="w-5 h-5 sm:w-6 sm:h-6 text-orange-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <div className="text-xs sm:text-sm text-gray-300">
+              <p className="font-semibold text-orange-300">
+                Modo Offline Activo
+              </p>
+              <p className="text-gray-400">
+                Tus registros se guardarán localmente y se sincronizarán
+                automáticamente ({offlineQueue.length} pendiente
+                {offlineQueue.length === 1 ? "" : "s"}).
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isOffline && offlineQueue.length > 0 && (
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-linear-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/40 rounded-lg flex items-center justify-between gap-3 animate-fadeIn">
+            <div>
+              <p className="text-xs sm:text-sm text-blue-200 font-semibold">
+                Registros offline pendientes: {offlineQueue.length}
+              </p>
+              <p className="text-xs text-gray-400">
+                Se sincronizarán automáticamente o puedes hacerlo manualmente.
+              </p>
+            </div>
+            <button
+              onClick={syncOfflineWorkouts}
+              disabled={syncingOffline}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-400/60 text-blue-200 hover:bg-blue-400/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {syncingOffline ? "Sincronizando..." : "Sincronizar"}
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-4 sm:mb-6">
           <button
@@ -1066,7 +1387,7 @@ export default function ProgressPage() {
                 >
                   {/* Exercise Header */}
                   <div className="flex items-start justify-between mb-3 sm:mb-4 gap-2">
-                    <div className="flex items-start gap-2 sm:gap-3 min-w-0">
+                    <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
                       <button
                         onClick={() =>
                           handleMarkAllSeriesAsCompleted(exerciseIndex)
@@ -1103,7 +1424,7 @@ export default function ProgressPage() {
                           </svg>
                         )}
                       </button>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <h4
                           className={`font-semibold text-sm sm:text-lg transition-all duration-300 truncate ${
                             exercise.status === "completado"
@@ -1118,6 +1439,21 @@ export default function ProgressPage() {
                         </p>
                       </div>
                     </div>
+                    <button
+                      onClick={() => handleOpenReplaceModal(exerciseIndex)}
+                      disabled={
+                        !isToday ||
+                        (existingWorkout && existingWorkout.its_done) ||
+                        false
+                      }
+                      className="px-3 py-1.5 bg-blue-400/10 hover:bg-blue-400/20 border border-blue-400/40 hover:border-blue-400/60 text-blue-300 rounded-lg text-xs font-medium transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 shrink-0"
+                      title="Cambiar ejercicio solo para hoy"
+                    >
+                      <span className="hidden sm:inline">
+                        Cambiar Ejercicio
+                      </span>
+                      <span className="sm:hidden">Cambiar</span>
+                    </button>
                   </div>
 
                   {/* Series List */}
@@ -1313,37 +1649,63 @@ export default function ProgressPage() {
 
           {/* Submit Button */}
           {exercises.length > 0 && (
-            <div className="flex gap-3 sm:gap-4 animate-fadeIn">
-              <button
-                onClick={handleSubmit}
-                disabled={saving}
-                className="flex-1 px-4 sm:px-6 py-3 sm:py-4 bg-linear-to-r from-pink-400 to-purple-400 hover:from-pink-500 hover:to-purple-500 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg shadow-pink-400/20 hover:shadow-pink-400/40 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 text-sm sm:text-base"
-              >
-                {saving ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-white"></div>
-                    <span className="hidden sm:inline">Guardando...</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg
-                      className="w-4 h-4 sm:w-5 sm:h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+            <div className="animate-fadeIn">
+              <div className="flex gap-3 sm:gap-4">
+                <button
+                  onClick={handleSubmit}
+                  disabled={saving}
+                  className="flex-1 px-4 sm:px-6 py-3 sm:py-4 bg-linear-to-r from-pink-400 to-purple-400 hover:from-pink-500 hover:to-purple-500 text-white font-semibold rounded-lg transition-all duration-300 shadow-lg shadow-pink-400/20 hover:shadow-pink-400/40 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 text-sm sm:text-base"
+                >
+                  {saving ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-white"></div>
+                      <span className="hidden sm:inline">Guardando...</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg
+                        className="w-4 h-4 sm:w-5 sm:h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                      <span className="hidden sm:inline">
+                        {isOffline ? "Guardar Offline" : "Guardar Registro"}
+                      </span>
+                      <span className="sm:hidden">
+                        {isOffline ? "Offline" : "Guardar"}
+                      </span>
+                    </span>
+                  )}
+                </button>
+              </div>
+              {(isOffline || offlineQueue.length > 0) && (
+                <p className="text-xs text-center text-gray-400 mt-2">
+                  {isOffline
+                    ? "Sin conexión: guardaremos tu progreso en este dispositivo."
+                    : offlineQueue.length > 0
+                    ? `Pendientes por sincronizar: ${offlineQueue.length}`
+                    : null}
+                  {!isOffline && offlineQueue.length > 0 && (
+                    <button
+                      onClick={syncOfflineWorkouts}
+                      disabled={syncingOffline}
+                      className="ml-2 text-blue-300 underline disabled:no-underline disabled:opacity-60"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                    <span className="hidden sm:inline">Guardar Registro</span>
-                    <span className="sm:hidden">Guardar</span>
-                  </span>
-                )}
-              </button>
+                      {syncingOffline
+                        ? "Sincronizando..."
+                        : "Sincronizar ahora"}
+                    </button>
+                  )}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -1626,6 +1988,12 @@ export default function ProgressPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {offlineNotice && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-[#121212] border border-gray-800/60 text-gray-200 px-4 py-2 rounded-lg shadow-lg text-xs sm:text-sm">
+          {offlineNotice}
         </div>
       )}
     </div>
